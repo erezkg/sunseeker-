@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sunseeker</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  html,body{margin:0;height:100%;font-family:system-ui,sans-serif}
+  #map{position:absolute;inset:0}
+  #panel{position:absolute;z-index:1000;top:10px;left:10px;right:10px;max-width:340px;
+    background:#fff;border-radius:10px;padding:10px 14px;box-shadow:0 2px 10px #0004;font-size:14px}
+  #panel b{font-size:16px}
+  select,button{font:inherit;margin-top:6px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <b>☀️ Sunseeker</b>
+  <div id="status">Finding your location…</div>
+  <label>Search radius
+    <select id="radius">
+      <option value="25">25 km</option><option value="50">50 km</option>
+      <option value="100" selected>100 km</option><option value="200">200 km</option>
+    </select>
+  </label>
+  <button id="refresh">Refresh</button>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const N = 7; // grid is N x N points
+const map = L.map('map').setView([0, 0], 2);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {attribution: '© OpenStreetMap, weather © Open-Meteo', maxZoom: 18}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+const statusEl = document.getElementById('status');
+let me = null;
+
+function km(a, b) {
+  const r = Math.PI / 180, dLat = (b[0]-a[0])*r, dLon = (b[1]-a[1])*r;
+  const h = Math.sin(dLat/2)**2 + Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLon/2)**2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+
+// cloud cover % -> colour (green = clear, grey = overcast)
+function colour(c) {
+  const g = Math.round(200 - c * 1.2);
+  return `rgb(${Math.round(255 - c*1.1)},${Math.round(190 - c*0.5)},${g > 40 ? Math.round(c*0.9) : 90})`;
+}
+
+async function load() {
+  const radius = +document.getElementById('radius').value;
+  statusEl.textContent = 'Fetching cloud cover…';
+  layer.clearLayers();
+  const [lat, lon] = me;
+  const dLat = radius / 111, dLon = radius / (111 * Math.cos(lat * Math.PI / 180));
+  const pts = [];
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++)
+    pts.push([lat + dLat * (2*i/(N-1) - 1), lon + dLon * (2*j/(N-1) - 1)]);
+  const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day' +
+    '&latitude=' + pts.map(p => p[0].toFixed(3)).join(',') +
+    '&longitude=' + pts.map(p => p[1].toFixed(3)).join(',');
+  try {
+    const res = await (await fetch(url)).json();
+    const data = (Array.isArray(res) ? res : [res]).map((r, k) => ({
+      pos: pts[k], cloud: r.current.cloud_cover, day: r.current.is_day }));
+    let best = null;
+    data.forEach(d => {
+      L.circleMarker(d.pos, {radius: 14, stroke: false, fillOpacity: .7, fillColor: colour(d.cloud)})
+        .bindTooltip(d.cloud + '% cloud').addTo(layer);
+      d.dist = km(me, d.pos);
+      if (d.cloud <= 20 && (!best || d.dist < best.dist)) best = d;
+    });
+    L.marker(me).bindTooltip('You are here').addTo(layer);
+    const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
+    const night = here.day ? '' : ' (it is night there now)';
+    if (here.cloud <= 20) statusEl.textContent = `Sun is shining at your location (${here.cloud}% cloud)${night}.`;
+    else if (best) {
+      const bearing = Math.round((Math.atan2(best.pos[1]-me[1], best.pos[0]-me[0]) * 180/Math.PI + 360) % 360);
+      statusEl.textContent = `${here.cloud}% cloud here. Nearest sun: ${best.dist.toFixed(0)} km away (${best.cloud}% cloud)${night}.`;
+      L.polyline([me, best.pos], {color: '#e69500', dashArray: '6'}).addTo(layer);
+    } else statusEl.textContent = `${here.cloud}% cloud here, and no clear skies within ${radius} km. Try a bigger radius.`;
+    map.fitBounds(L.latLngBounds(pts).pad(.1));
+  } catch (e) { statusEl.textContent = 'Could not load weather: ' + e.message; }
+}
+
+function locate() {
+  if (!navigator.geolocation) { statusEl.textContent = 'Geolocation not supported.'; return; }
+  navigator.geolocation.getCurrentPosition(
+    p => { me = [p.coords.latitude, p.coords.longitude]; load(); },
+    e => { statusEl.textContent = 'Location denied: ' + e.message; },
+    {enableHighAccuracy: false, timeout: 15000});
+}
+document.getElementById('refresh').onclick = () => me ? load() : locate();
+document.getElementById('radius').onchange = () => me && load();
+locate();
+</script>
+</body>
+</html>
