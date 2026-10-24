@@ -12,6 +12,9 @@
     background:#fff;border-radius:10px;padding:10px 14px;box-shadow:0 2px 10px #0004;font-size:14px}
   #panel b{font-size:16px}
   select,button{font:inherit;margin-top:6px}
+  #days{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+  #days button{margin:0;padding:4px 8px;border:1px solid #ccc;border-radius:14px;background:#fff;cursor:pointer}
+  #days button.on{background:#f5b301;border-color:#f5b301;font-weight:600}
 </style>
 </head>
 <body>
@@ -26,6 +29,7 @@
     </select>
   </label>
   <button id="refresh">Refresh</button>
+  <div id="days"></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
@@ -49,38 +53,76 @@ function colour(c) {
   return `rgb(${Math.round(255 - c*1.1)},${Math.round(190 - c*0.5)},${g > 40 ? Math.round(c*0.9) : 90})`;
 }
 
+let pts = [], series = [], sel = 0; // sel: 0 = now, 1..7 = day index+1
+
+function buildChips() {
+  const days = series[0].days;
+  const el = document.getElementById('days');
+  el.innerHTML = '';
+  const labels = ['Now', ...days.map((d, i) => i === 0 ? 'Today' : i === 1 ? 'Tomorrow' :
+    new Date(d + 'T12:00').toLocaleDateString(undefined, {weekday: 'short'}))];
+  labels.forEach((t, i) => {
+    const b = document.createElement('button');
+    b.textContent = t; b.className = i === sel ? 'on' : '';
+    b.onclick = () => { sel = i; buildChips(); render(); };
+    el.appendChild(b);
+  });
+}
+
+// value shown for a grid point: current cloud cover, or mean over daylight hours (9-17h local) of that day
+function value(p) {
+  return sel === 0 ? p.now : p.daily[sel - 1];
+}
+
+function render() {
+  layer.clearLayers();
+  const radius = +document.getElementById('radius').value;
+  let best = null;
+  const data = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
+  data.forEach(d => {
+    L.circleMarker(d.pos, {radius: 14, stroke: false, fillOpacity: .7, fillColor: colour(d.cloud)})
+      .bindTooltip(d.cloud + '% cloud').addTo(layer);
+    d.dist = km(me, d.pos);
+    if (d.cloud <= 25 && (!best || d.dist < best.dist)) best = d;
+  });
+  L.marker(me).bindTooltip('You are here').addTo(layer);
+  const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
+  const when = sel === 0 ? 'now' : sel === 1 ? 'today' : sel === 2 ? 'tomorrow' : 'that day';
+  const night = sel === 0 && !here.day ? ' (it is night there now)' : '';
+  if (here.cloud <= 25) statusEl.textContent = `Sunny at your location ${when} (${here.cloud}% cloud)${night}.`;
+  else if (best) {
+    statusEl.textContent = `${here.cloud}% cloud here ${when}. Nearest sun: ${best.dist.toFixed(0)} km away (${best.cloud}% cloud)${night}.`;
+    L.polyline([me, best.pos], {color: '#e69500', dashArray: '6'}).addTo(layer);
+  } else statusEl.textContent = `${here.cloud}% cloud here ${when}, and no sunny spot within ${radius} km. Try a bigger radius.`;
+}
+
 async function load() {
   const radius = +document.getElementById('radius').value;
   statusEl.textContent = 'Fetching cloud cover…';
-  layer.clearLayers();
   const [lat, lon] = me;
   const dLat = radius / 111, dLon = radius / (111 * Math.cos(lat * Math.PI / 180));
-  const pts = [];
+  pts = [];
   for (let i = 0; i < N; i++) for (let j = 0; j < N; j++)
     pts.push([lat + dLat * (2*i/(N-1) - 1), lon + dLon * (2*j/(N-1) - 1)]);
-  const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day' +
+  const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover' +
+    '&forecast_days=7&timezone=auto' +
     '&latitude=' + pts.map(p => p[0].toFixed(3)).join(',') +
     '&longitude=' + pts.map(p => p[1].toFixed(3)).join(',');
   try {
     const res = await (await fetch(url)).json();
-    const data = (Array.isArray(res) ? res : [res]).map((r, k) => ({
-      pos: pts[k], cloud: r.current.cloud_cover, day: r.current.is_day }));
-    let best = null;
-    data.forEach(d => {
-      L.circleMarker(d.pos, {radius: 14, stroke: false, fillOpacity: .7, fillColor: colour(d.cloud)})
-        .bindTooltip(d.cloud + '% cloud').addTo(layer);
-      d.dist = km(me, d.pos);
-      if (d.cloud <= 20 && (!best || d.dist < best.dist)) best = d;
+    if (res.error) throw new Error(res.reason);
+    series = (Array.isArray(res) ? res : [res]).map(r => {
+      const t = r.hourly.time, c = r.hourly.cloud_cover, byDay = {};
+      t.forEach((ts, i) => {
+        const h = +ts.slice(11, 13);
+        if (h >= 9 && h <= 17) (byDay[ts.slice(0, 10)] ||= []).push(c[i]);
+      });
+      const days = Object.keys(byDay);
+      return {now: r.current.cloud_cover, day: r.current.is_day, days,
+        daily: days.map(d => Math.round(byDay[d].reduce((a, b) => a + b) / byDay[d].length))};
     });
-    L.marker(me).bindTooltip('You are here').addTo(layer);
-    const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
-    const night = here.day ? '' : ' (it is night there now)';
-    if (here.cloud <= 20) statusEl.textContent = `Sun is shining at your location (${here.cloud}% cloud)${night}.`;
-    else if (best) {
-      const bearing = Math.round((Math.atan2(best.pos[1]-me[1], best.pos[0]-me[0]) * 180/Math.PI + 360) % 360);
-      statusEl.textContent = `${here.cloud}% cloud here. Nearest sun: ${best.dist.toFixed(0)} km away (${best.cloud}% cloud)${night}.`;
-      L.polyline([me, best.pos], {color: '#e69500', dashArray: '6'}).addTo(layer);
-    } else statusEl.textContent = `${here.cloud}% cloud here, and no clear skies within ${radius} km. Try a bigger radius.`;
+    buildChips();
+    render();
     map.fitBounds(L.latLngBounds(pts).pad(.1));
   } catch (e) { statusEl.textContent = 'Could not load weather: ' + e.message; }
 }
