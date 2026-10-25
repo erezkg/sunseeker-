@@ -183,15 +183,6 @@ function featureColor(v, classKey, kx, ky) {
   return u < pB ? BLUE : u < pB + pSun * .7 ? YELLOW : u < pB + pSun ? RED : PAPER;
 }
 
-// the paper itself takes a flat wash, like a Mondrian plane: cream where it is sunny, pale blue where it is
-// overcast, white in between; the edges between them are short so each reads as one colour
-function paperTint(v) {
-  if (v == null) return PAPER;
-  const t = v / 100, sun = 1 - smooth(.3, .4, t), cloud = smooth(.6, .7, t);
-  const mix = (a, b, k) => Math.round(a + (b - a) * k);
-  return pack(mix(mix(255, 255, sun), 208, cloud), mix(mix(255, 243, sun), 222, cloud), mix(mix(255, 208, sun), 243, cloud));
-}
-
 // OSM road fills (motorway, trunk, primary, secondary); their casings are the only strongly saturated colours on the map
 const ROAD_FILLS = [[232, 146, 162], [249, 178, 156], [252, 214, 164], [247, 250, 191]];
 
@@ -256,28 +247,6 @@ function label(cls, key) {
   return {lab, cx, cy, area, border, ck};
 }
 
-// pieces of bare paper between streets, coast and features; each takes one flat wash so the wash follows the map
-function labelPaper(cls) {
-  const plab = new Int32Array(N * N).fill(-1), pcx = [], pcy = [], parea = [], pedge = [], stack = new Int32Array(N * N);
-  for (let s = 0; s < N * N; s++) {
-    if (cls[s] !== 0 || plab[s] >= 0) continue;
-    const id = parea.length;
-    let n = 0, ax = 0, ay = 0, sp = 0, edge = false;
-    stack[sp++] = s; plab[s] = id;
-    while (sp) {
-      const i = stack[--sp], x = i & (N - 1), y = i >> 9;
-      n++; ax += x; ay += y;
-      if (x === 0 || y === 0 || x === N - 1 || y === N - 1) edge = true;
-      if (x > 0 && plab[i-1] < 0 && cls[i-1] === 0) { plab[i-1] = id; stack[sp++] = i - 1; }
-      if (x < N-1 && plab[i+1] < 0 && cls[i+1] === 0) { plab[i+1] = id; stack[sp++] = i + 1; }
-      if (y > 0 && plab[i-N] < 0 && cls[i-N] === 0) { plab[i-N] = id; stack[sp++] = i - N; }
-      if (y < N-1 && plab[i+N] < 0 && cls[i+N] === 0) { plab[i+N] = id; stack[sp++] = i + N; }
-    }
-    pcx.push(ax / n); pcy.push(ay / n); parea.push(n); pedge.push(edge);
-  }
-  return {plab, pcx, pcy, parea, pedge};
-}
-
 const HUGE = 30000;   // patches bigger than this are split into 128px cells so open land is not one flat slab
 
 function paintTile(canvas) {
@@ -300,20 +269,10 @@ function paintTile(canvas) {
       ? featureColor(cloudAtGlobal(gx, gy, z), ck[l], Math.floor(gx / 1024), Math.floor(gy / 1024))
       : featureColor(cloudAtGlobal(gx, gy, z), ck[l], Math.round(gx * 4), Math.round(gy * 4));
   }
-  // wash: one flat tint per piece of paper (or per unpainted feature); pieces cut by the tile edge, and open
-  // country too big to be one piece, use 16px blocks so neighbouring tiles agree
-  const {plab, pcx, pcy, parea, pedge} = st;
-  const ptint = new Uint32Array(parea.length), ftint = new Uint32Array(area.length);
-  for (let p = 0; p < parea.length; p++) ptint[p] = parea[p] > HUGE || pedge[p] ? 0 : paperTint(cloudAtGlobal(ox + pcx[p] / 2, oy + pcy[p] / 2, z));
-  for (let l = 0; l < area.length; l++) if (cols[l] === PAPER) ftint[l] = paperTint(cloudAtGlobal(ox + cx[l] / 2, oy + cy[l] / 2, z));
-  const tint = new Uint32Array(1024);
-  for (let b = 0; b < 1024; b++) tint[b] = paperTint(cloudAtGlobal(ox + ((b & 31) * 16 + 8) / 2, oy + ((b >> 5) * 16 + 8) / 2, z));
   const ctx = canvas.getContext('2d'), img = ctx.createImageData(N, N), out = new Uint32Array(img.data.buffer);
   for (let i = 0; i < N * N; i++) {
     const c = cls[i];
-    let col = c === 1 ? LINE : c === 2 ? WATER : c === 3 ? (huge[lab[i]] ? huge[lab[i]][(((i >> 9) >> 7) << 2) | ((i & 511) >> 7)] : cols[lab[i]]) : PAPER;
-    if (col === PAPER) col = (c === 0 && ptint[plab[i]]) || (c === 3 && !huge[lab[i]] && ftint[lab[i]]) || tint[((i >> 13) << 5) | ((i & 511) >> 4)];
-    out[i] = col;
+    out[i] = c === 1 ? LINE : c === 2 ? WATER : c === 3 ? (huge[lab[i]] ? huge[lab[i]][(((i >> 9) >> 7) << 2) | ((i & 511) >> 7)] : cols[lab[i]]) : PAPER;
   }
   ctx.putImageData(img, 0, 0);
 }
@@ -339,7 +298,7 @@ const SunTiles = L.GridLayer.extend({
     Promise.all(jobs).then(() => {
       try {
         const {cls, key} = classify(sctx.getImageData(0, 0, N, N).data, deep ? coords.z + 1 : coords.z);
-        canvas._st = Object.assign({cls, z: coords.z, x: coords.x, y: coords.y}, label(cls, key), labelPaper(cls));
+        canvas._st = Object.assign({cls, z: coords.z, x: coords.x, y: coords.y}, label(cls, key));
         paintTile(canvas);
       } catch (e) { canvas.getContext('2d').drawImage(src, 0, 0); } // pixels unreadable: show the plain map
       done(null, canvas);
