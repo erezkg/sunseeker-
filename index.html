@@ -191,6 +191,7 @@ function render() {
   if (here.cloud <= SUNNY) say(here.lv, `Sunny ${when}`, `${here.cloud}% cloud at your location.${night}`);
   else if (best) say(here.lv, `${here.cloud}% cloud ${when}`, sunLine(best, sunInfo, night));
   else say(here.lv, `Cloudy ${when}`, `${here.cloud}% cloud here and no sun in this view. Zoom out or pan to look further.`);
+  showPick();
 }
 
 // cloud % -> colour, orange (clear) through yellow and cyan to deep blue (overcast)
@@ -271,8 +272,14 @@ async function load() {
 // ---- Mondrian look: same-level neighbours merge into rectangles split by thick black lines ----
 const MONDRIAN = ['#d92b1c', '#f6cf1a', '#ffffff', '#ffffff', '#1d4f9f']; // red, yellow, white, white, blue by level
 
-function drawMondrian(data) {
-  const {cols, rows, size} = grid, cw = size.x / cols, ch = size.y / rows;
+function drawMondrian(sampled) {
+  const {size} = grid, px = Math.max(22, cellPxFor(grid.zoom));
+  const cols = Math.max(3, Math.round(size.x / px)), rows = Math.max(3, Math.round(size.y / px)), cw = size.x / cols, ch = size.y / rows;
+  const data = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const cloud = Math.round(sample(sampled, (c + .5) * cw, (r + .5) * ch));
+    data.push({cloud, lv: level(cloud)});
+  }
   const seen = new Set(), at = (r, c) => r * cols + c;
   const nw = map.latLngToLayerPoint(grid.bounds.getNorthWest());
   const ll = (x, y) => map.layerPointToLatLng(L.point(nw.x + x, nw.y + y));
@@ -305,7 +312,9 @@ styleBtn.onclick = () => {
 };
 
 // ---- parcel look: the basemap's roads become white lines, the blocks between them get a flat colour each ----
-const CELL = 44;  // blocks are also cut into squares of this size so open country is not one huge patch
+// on-screen size of the squares: smaller when zoomed out, so the map shows finer detail across a wide area
+// (the weather itself is still sampled on the coarser grid and interpolated)
+const cellPxFor = z => Math.max(14, Math.min(60, Math.round(44 + (z - 9) * 6)));
 let regions = null;
 
 function loadTile(z, x, y) {
@@ -317,7 +326,7 @@ function loadTile(z, x, y) {
 }
 
 async function buildRegions(g) {
-  const W = Math.round(g.size.x), H = Math.round(g.size.y), z = g.zoom, pb = g.pixelBounds;
+  const W = Math.round(g.size.x), H = Math.round(g.size.y), z = g.zoom, pb = g.pixelBounds, CELL = cellPxFor(z);
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d', {willReadFrequently: true});
   const jobs = [];
@@ -373,14 +382,27 @@ function drawParcels(data) {
   L.imageOverlay(cv.toDataURL(), grid.bounds, {opacity: 1, interactive: false, className: animClass()}).addTo(layer);
 }
 
-// tap anywhere to read the cloud cover there
-let lastData = [];
-map.on('click', e => {
-  if (!lastData.length) return;
-  const nw = map.latLngToLayerPoint(grid.bounds.getNorthWest()), p = map.latLngToLayerPoint(e.latlng);
-  L.popup({closeButton: false, offset: [0, -4]}).setLatLng(e.latlng)
-    .setContent(`<b>${Math.round(sample(lastData, p.x - nw.x, p.y - nw.y))}%</b> cloud`).openOn(map);
-});
+// tap anywhere: mark the spot with its cloud cover, plus distance and drive time from you
+let lastData = [], pick = null, refreshing = false;
+const pickGroup = L.layerGroup().addTo(map);
+const cloudAt = ll => {
+  const nw = map.latLngToLayerPoint(grid.bounds.getNorthWest()), p = map.latLngToLayerPoint(ll);
+  return Math.round(sample(lastData, p.x - nw.x, p.y - nw.y));
+};
+const pickHtml = (cloud, info) => `<b>${cloud}% cloud</b><br>${fmtDrive(info)}`;
+
+function showPick() {
+  if (!pick || !lastData.length || !me) return;
+  const at = pick, cloud = cloudAt(at), d = km(me, [at.lat, at.lng]);
+  refreshing = true; pickGroup.clearLayers();
+  L.polyline([me, at], {color: '#111', weight: 2, dashArray: '2 7', lineCap: 'round', interactive: false}).addTo(pickGroup);
+  const m = L.circleMarker(at, {radius: 9, color: '#111', weight: 3, fillColor: '#fff', fillOpacity: 1}).addTo(pickGroup);
+  m.bindPopup(pickHtml(cloud, {km: d * 1.3, min: d * 1.3 / 65 * 60, est: true}), {closeButton: false, offset: [0, -4]}).openPopup();
+  refreshing = false;
+  drive(me, [at.lat, at.lng]).then(info => { if (pick === at) m.setPopupContent(pickHtml(cloud, info)); });
+}
+map.on('click', e => { pick = e.latlng; showPick(); });
+map.on('popupclose', () => { if (!refreshing) { pick = null; pickGroup.clearLayers(); } });
 
 // reload the grid once the user stops panning or zooming
 map.on('moveend', () => { if (me) { clearTimeout(timer); timer = setTimeout(load, 700); } });
