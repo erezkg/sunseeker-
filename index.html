@@ -3,115 +3,92 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#f6f3ee">
+<meta name="theme-color" content="#ffffff">
 <title>Sunseeker</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
   :root{
-    --bg:#f6f3ee; --card:rgba(255,255,255,.82); --ink:#1d1d1f; --muted:#6e6e73; --line:rgba(0,0,0,.08);
-    --sun:#f59e0b; --sun-bg:rgba(251,191,36,.30); --part:#d4a24c; --part-bg:rgba(226,196,130,.26);
-    --cloud:#64748b; --cloud-bg:rgba(100,116,139,.22); --shadow:0 8px 30px rgba(0,0,0,.12);
-    /* Mondrian-style blocks, sunniest to cloudiest */
-    --b0:#ff6a13; --b1:#fdd22f; --b2:#a8e4ef; --b3:#3b88d4; --b4:#0f4c97; --gap:#fff;
+    --bg:#ffffff; --card:rgba(255,255,255,.86); --ink:#1d1d1f; --muted:#6e6e73; --line:rgba(0,0,0,.1); --shadow:0 8px 30px rgba(0,0,0,.14);
+    /* Mondrian palette, by cloud level */
+    --b0:#d92b1c; --b1:#f6cf1a; --b2:#ffffff; --b3:#ffffff; --b4:#1d4f9f;
   }
   @media (prefers-color-scheme:dark){:root{
-    --bg:#16181d; --card:rgba(30,32,38,.82); --ink:#f5f5f7; --muted:#a1a1a8; --line:rgba(255,255,255,.1);
-    --sun:#fbbf24; --sun-bg:rgba(251,191,36,.28); --part:#d9b45f; --part-bg:rgba(217,180,95,.2);
-    --cloud:#94a3b8; --cloud-bg:rgba(148,163,184,.2); --shadow:0 8px 30px rgba(0,0,0,.5);
+    --card:rgba(30,32,38,.86); --ink:#f5f5f7; --muted:#a1a1a8; --line:rgba(255,255,255,.12); --shadow:0 8px 30px rgba(0,0,0,.5);
   }}
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  html,body{margin:0;height:100%;background:#fff;color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-  #map{position:absolute;inset:0;background:var(--bg)}
+  #map{position:absolute;inset:0;background:#fff}
   .glass{background:var(--card);backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
     border:1px solid var(--line);box-shadow:var(--shadow)}
 
   #status{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;max-width:420px;
     border-radius:20px;padding:14px 16px;display:flex;gap:14px;align-items:center}
-  #status .ico{flex:none;width:46px;height:46px;border-radius:6px;display:grid;place-items:center;background:var(--c)}
+  #status .ico{flex:none;width:46px;height:46px;border-radius:6px;display:grid;place-items:center;background:var(--c);border:2px solid #111}
   #status .ico svg{width:26px;height:26px}
+  .ico.b0,.ico.b4{color:#fff}.ico.b1,.ico.b2,.ico.b3{color:#1d1d1f}
+  .b0{--c:var(--b0)}.b1{--c:var(--b1)}.b2{--c:var(--b2)}.b3{--c:var(--b3)}.b4{--c:var(--b4)}
   #status h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em}
   #status p{margin:2px 0 0;font-size:13.5px;color:var(--muted);line-height:1.35}
+  #status>*{animation:fadein .35s ease backwards}
   .spin{animation:pulse 1.2s ease-in-out infinite}
   @keyframes pulse{50%{opacity:.35}}
+  @keyframes fadein{from{opacity:0}}
 
   #days{position:absolute;z-index:1000;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 14px);
     max-width:520px;border-radius:999px;padding:5px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
   #days::-webkit-scrollbar{display:none}
   #days button{flex:1 0 auto;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:550;
     padding:9px 14px;border-radius:999px;cursor:pointer;transition:background .2s,color .2s}
-  #days button.on{background:var(--ink);color:var(--bg)}
+  #days button.on{background:#111;color:#fff}
 
   #locate{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 128px);width:46px;height:46px;
     border-radius:50%;display:grid;place-items:center;color:var(--ink);cursor:pointer;padding:0}
   #locate svg{width:22px;height:22px}
   #locate.busy svg{animation:pulse 1s ease-in-out infinite}
-  #style{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 182px);height:36px;border-radius:999px;
-    padding:0 14px;font:inherit;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}
   #legend{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 78px);border-radius:14px;
     padding:8px 11px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
   #legend span{display:flex;align-items:center;gap:4px}
-  #legend i{width:14px;height:14px;display:inline-block;background:var(--c);border:1px solid rgba(0,0,0,.15)}
+  #legend i{width:14px;height:14px;display:inline-block;background:var(--c);border:1.5px solid #111}
 
-  /* map blocks */
-  .blk{display:grid;place-items:center;pointer-events:none}
-  .blk svg{width:100%;height:100%}
-  .ico.b0,.ico.b1,.ico.b2{color:#1d1d1f}.ico.b3,.ico.b4{color:#fff}
-  .blk.b0,.blk.b1,.blk.b2{color:rgba(29,29,31,.8)}.blk.b3,.blk.b4{color:rgba(255,255,255,.92)}
-  .b0{--c:var(--b0)}.b1{--c:var(--b1)}.b2{--c:var(--b2)}.b3{--c:var(--b3)}.b4{--c:var(--b4)}
-  .field{mix-blend-mode:multiply}
-  /* day-switch motion: the new map wipes in from the direction of travel; the old one is removed once it has covered it */
-  @keyframes fadein{from{opacity:0}}
-  @keyframes wipeR{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
-  @keyframes wipeL{from{clip-path:inset(0 0 0 100%)}to{clip-path:inset(0 0 0 0)}}
-  .anim-fade{animation:fadein .5s ease backwards}
-  .anim-wipeR{animation:wipeR .8s cubic-bezier(.4,0,.2,1) backwards}
-  .anim-wipeL{animation:wipeL .8s cubic-bezier(.4,0,.2,1) backwards}
-  #status>*{animation:fadein .35s ease backwards}
-  @media (prefers-reduced-motion:reduce){.anim-fade,.anim-wipeR,.anim-wipeL,#status>*{animation:none}}
-  /* wash out the OSM tiles so the blocks dominate */
-  .leaflet-tile-pane{filter:grayscale(1) contrast(.7) brightness(1.2)}
-  @media (prefers-color-scheme:dark){.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(1) brightness(.6) contrast(.9)}}
   .pin{width:20px;height:20px;border-radius:50%;background:#111;border:4px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4)}
-  .leaflet-control-attribution{background:var(--card)!important;color:var(--muted)!important;font-size:10px;border-radius:8px 0 0 0}
-  .leaflet-control-attribution a{color:var(--muted)!important}
-  .leaflet-tooltip{border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);box-shadow:var(--shadow);font:600 12px system-ui}
+  .leaflet-control-attribution{background:rgba(255,255,255,.85)!important;color:#555!important;font-size:10px;border-radius:8px 0 0 0}
+  .leaflet-tooltip,.leaflet-popup-content-wrapper{border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);box-shadow:var(--shadow);font:600 12px system-ui}
+  .leaflet-popup-content{margin:9px 12px;line-height:1.4}
+  .leaflet-popup-tip{background:var(--card)}
   .leaflet-tooltip:before{display:none}
+  @media (prefers-reduced-motion:reduce){#status>*{animation:none}}
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="status" class="glass"></div>
 <div id="legend" class="glass"></div>
-<button id="style" class="glass"></button>
 <button id="locate" class="glass" aria-label="Centre on my location"></button>
 <div id="days" class="glass"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-const MAX_POINTS = 120; // weather points sampled across the visible map
-const SUNNY = 25;     // % cloud cover at or below which a spot counts as sunny
+const MAX_POINTS = 120;  // weather points sampled across the visible map
+const SUNNY = 25;        // % cloud cover at or below which a spot counts as sunny
 
-// Lucide-style stroke icons
 const svg = body => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 const ICONS = {
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>'),
   part: svg('<path d="M12 2v2M4.93 4.93l1.41 1.41M20 12h2M19.07 4.93l-1.41 1.41M15.947 12.65a4 4 0 0 0-5.925-4.128M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"/>'),
   cloud: svg('<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>'),
+  locate: svg('<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>'),
 };
 const level = c => c <= 10 ? 0 : c <= SUNNY ? 1 : c <= 45 ? 2 : c <= 70 ? 3 : 4;
 const iconFor = lv => lv <= 1 ? ICONS.sun : lv === 2 || lv === 3 ? ICONS.part : ICONS.cloud;
 
-const map = L.map('map', {zoomControl: false}).setView([0, 0], 2);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap, weather © Open-Meteo', maxZoom: 18}).addTo(map);
-let layer = L.layerGroup().addTo(map);
-let anim = 'fade'; // transition for the next render: 'fade', or 1 / -1 for a wipe in that direction
-const animClass = () => anim === 1 ? 'anim-wipeR' : anim === -1 ? 'anim-wipeL' : 'anim-fade';
+const map = L.map('map', {zoomControl: false, maxZoom: 18}).setView([0, 0], 2);
+const layer = L.layerGroup().addTo(map);   // pin, nearest-sun marker
 const statusEl = document.getElementById('status');
 let me = null, pts = [], series = [], sel = 0, grid = {cols: 3, rows: 3}, loadId = 0, timer = null;
+let fieldVals = null;                      // cloud cover % at each grid point for the chosen day
 
 document.getElementById('legend').innerHTML =
-  `<span><i class="b0"></i><i class="b1"></i>Sunny</span><span><i class="b2"></i><i class="b3"></i>Mixed</span><span><i class="b4"></i>Cloudy</span>`;
+  `<span><i class="b0"></i><i class="b1"></i>Sunny</span><span><i class="b2"></i>Mixed</span><span><i class="b4"></i>Cloudy</span>`;
 
 function km(a, b) {
   const r = Math.PI / 180, dLat = (b[0]-a[0])*r, dLon = (b[1]-a[1])*r;
@@ -119,6 +96,162 @@ function km(a, b) {
   return 12742 * Math.asin(Math.sqrt(h));
 }
 
+// ---------------------------------------------------------------------------------------------
+// The map itself: OSM tiles redrawn in a Mondrian style. Streets turn black, and every building,
+// park or plot is filled red / yellow (sunny) or blue (cloudy) according to the weather there.
+// ---------------------------------------------------------------------------------------------
+const N = 512;                                  // pixels per tile (2x, built from four tiles one zoom deeper)
+const pack = (r, g, b) => ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+const PAPER = pack(255, 255, 255), LINE = pack(17, 17, 17), WATER = pack(186, 214, 243);
+const RED = pack(217, 43, 28), YELLOW = pack(240, 195, 20), BLUE = pack(29, 79, 159);
+
+function hash3(a, b, c) {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x7f4a7c15, 0xc2b2ae35) ^ Math.imul(c + 0x165667b1, 0x27d4eb2f);
+  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h = Math.imul(h, 0x297a2d39); h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
+// cloud cover at a pixel of the grid's screen, bilinear between the grid points
+function sample(vals, px, py) {
+  const {cols, rows, size} = grid;
+  const fx = Math.max(0, Math.min(cols - 1, px / (size.x / cols) - .5)), fy = Math.max(0, Math.min(rows - 1, py / (size.y / rows) - .5));
+  const j = Math.min(Math.floor(fx), cols - 2), i = Math.min(Math.floor(fy), rows - 2), tx = fx - j, ty = fy - i;
+  const v = (r, c) => vals[r * cols + c];
+  return (v(i, j) * (1 - tx) + v(i, j + 1) * tx) * (1 - ty) + (v(i + 1, j) * (1 - tx) + v(i + 1, j + 1) * tx) * ty;
+}
+
+// cloud % at a point given in pixels of zoom z (global pixel coordinates)
+function cloudAtGlobal(gx, gy, z) {
+  if (!fieldVals) return null;
+  const k = 2 ** (grid.zoom - z);
+  return sample(fieldVals, gx * k - grid.pixelBounds.min.x, gy * k - grid.pixelBounds.min.y);
+}
+
+// fill colour of one feature: blue gets likelier with cloud, red/yellow with sun, the rest stays paper-white
+function featureColor(v, classKey, kx, ky) {
+  if (v == null) return PAPER;
+  const u = hash3(classKey, kx, ky), t = v / 100;
+  const pB = .55 * t, pY = .40 * (1 - t), pR = .17 * (1 - t);
+  return u < pB ? BLUE : u < pB + pY ? YELLOW : u < pB + pY + pR ? RED : PAPER;
+}
+
+// sort every pixel of an OSM tile into paper / street line / water / feature fill
+function classify(px) {
+  const cls = new Uint8Array(N * N), key = new Uint16Array(N * N);
+  for (let i = 0; i < N * N; i++) {
+    const r = px[i*4], g = px[i*4+1], b = px[i*4+2], a = px[i*4+3];
+    if (a < 200) continue;
+    if (Math.abs(r - 170) < 14 && Math.abs(g - 211) < 12 && Math.abs(b - 223) < 12) { cls[i] = 2; continue; }
+    if (Math.abs(r - g) < 5 && Math.abs(g - b) < 5) { cls[i] = r >= 105 && r <= 205 ? 1 : 0; continue; } // grey casing = street, rest paper
+    if (r > 200 && r - b > 50) { cls[i] = 1; continue; }                                                    // coloured road fills
+    if (Math.abs(r - 242) < 7 && Math.abs(g - 239) < 7 && Math.abs(b - 233) < 8) continue;                 // plain land
+    if (Math.min(r, g, b) >= 228) continue;                                                                 // pale anti-aliasing fringes stay paper
+    cls[i] = 3; key[i] = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+  }
+  return {cls, key};
+}
+
+// connected patches of the same fill colour
+function label(cls, key) {
+  const lab = new Int32Array(N * N).fill(-1), cx = [], cy = [], area = [], border = [], ck = [], stack = new Int32Array(N * N);
+  for (let s = 0; s < N * N; s++) {
+    if (cls[s] !== 3 || lab[s] >= 0) continue;
+    const id = area.length, kk = key[s];
+    let n = 0, ax = 0, ay = 0, edge = false, sp = 0;
+    stack[sp++] = s; lab[s] = id;
+    while (sp) {
+      const i = stack[--sp], x = i & (N - 1), y = i >> 9;
+      n++; ax += x; ay += y;
+      if (x === 0 || y === 0 || x === N - 1 || y === N - 1) edge = true;
+      if (x > 0 && lab[i-1] < 0 && cls[i-1] === 3 && key[i-1] === kk) { lab[i-1] = id; stack[sp++] = i - 1; }
+      if (x < N-1 && lab[i+1] < 0 && cls[i+1] === 3 && key[i+1] === kk) { lab[i+1] = id; stack[sp++] = i + 1; }
+      if (y > 0 && lab[i-N] < 0 && cls[i-N] === 3 && key[i-N] === kk) { lab[i-N] = id; stack[sp++] = i - N; }
+      if (y < N-1 && lab[i+N] < 0 && cls[i+N] === 3 && key[i+N] === kk) { lab[i+N] = id; stack[sp++] = i + N; }
+    }
+    cx.push(ax / n); cy.push(ay / n); area.push(n); border.push(edge); ck.push(kk);
+  }
+  return {lab, cx, cy, area, border, ck};
+}
+
+const HUGE = 30000;   // patches bigger than this are split into 128px cells so open land is not one flat slab
+
+function paintTile(canvas) {
+  const st = canvas._st; if (!st) return;
+  const {cls, lab, cx, cy, area, border, ck} = st, z = st.z, ox = st.x * 256, oy = st.y * 256;
+  const cols = new Uint32Array(area.length), huge = [];
+  for (let l = 0; l < area.length; l++) {
+    if (area[l] < 6) { cols[l] = PAPER; continue; }
+    const gx = ox + cx[l] / 2, gy = oy + cy[l] / 2;
+    if (area[l] > HUGE) {
+      const cells = new Uint32Array(16);
+      for (let c = 0; c < 16; c++) {
+        const px = (c & 3) * 128 + 64, py = (c >> 2) * 128 + 64;
+        cells[c] = featureColor(cloudAtGlobal(ox + px / 2, oy + py / 2, z), ck[l], st.x * 4 + (c & 3), st.y * 4 + (c >> 2));
+      }
+      huge[l] = cells; continue;
+    }
+    // patches that touch a tile edge may continue in the neighbour tile, so they take a colour from a coarse shared cell
+    cols[l] = border[l]
+      ? featureColor(cloudAtGlobal(gx, gy, z), ck[l], Math.floor(gx / 1024), Math.floor(gy / 1024))
+      : featureColor(cloudAtGlobal(gx, gy, z), ck[l], Math.round(gx * 4), Math.round(gy * 4));
+  }
+  const ctx = canvas.getContext('2d'), img = ctx.createImageData(N, N), out = new Uint32Array(img.data.buffer);
+  for (let i = 0; i < N * N; i++) {
+    const c = cls[i];
+    out[i] = c === 1 ? LINE : c === 2 ? WATER : c === 3 ? (huge[lab[i]] ? huge[lab[i]][(((i >> 9) >> 7) << 2) | ((i & 511) >> 7)] : cols[lab[i]]) : PAPER;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function loadTile(z, x, y) {
+  return new Promise(res => {
+    const im = new Image(); im.crossOrigin = 'anonymous';
+    im.onload = () => res(im); im.onerror = () => res(null);
+    const n = 2 ** z;
+    im.src = `https://tile.openstreetmap.org/${z}/${((x % n) + n) % n}/${y}.png`;
+  });
+}
+
+const SunTiles = L.GridLayer.extend({
+  createTile(coords, done) {
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = N;
+    const src = document.createElement('canvas'); src.width = src.height = N;
+    const sctx = src.getContext('2d', {willReadFrequently: true});
+    const deep = coords.z < 18;                // use the next zoom level for double resolution
+    const jobs = deep
+      ? [0, 1, 2, 3].map(k => loadTile(coords.z + 1, coords.x * 2 + (k & 1), coords.y * 2 + (k >> 1)).then(im => im && sctx.drawImage(im, (k & 1) * 256, (k >> 1) * 256)))
+      : [loadTile(coords.z, coords.x, coords.y).then(im => im && sctx.drawImage(im, 0, 0, N, N))];
+    Promise.all(jobs).then(() => {
+      try {
+        const {cls, key} = classify(sctx.getImageData(0, 0, N, N).data);
+        canvas._st = Object.assign({cls, z: coords.z, x: coords.x, y: coords.y}, label(cls, key));
+        paintTile(canvas);
+      } catch (e) { canvas.getContext('2d').drawImage(src, 0, 0); } // pixels unreadable: show the plain map
+      done(null, canvas);
+    });
+    return canvas;
+  }
+});
+const tiles = new SunTiles({tileSize: 256, maxZoom: 18, attribution: '© OpenStreetMap, weather © Open-Meteo'}).addTo(map);
+const repaintAll = () => Object.values(tiles._tiles).forEach(t => t.el && t.el._st && paintTile(t.el));
+
+// swap the field's values, blending from the old ones so squares flip across the map
+let tween = 0;
+function setField(vals, animate) {
+  cancelAnimationFrame(tween);
+  const from = fieldVals;
+  if (!animate || !from || from.length !== vals.length || matchMedia('(prefers-reduced-motion: reduce)').matches) { fieldVals = vals; repaintAll(); return; }
+  const t0 = performance.now(), D = 750;
+  const step = now => {
+    const t = Math.min(1, (now - t0) / D), e = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    fieldVals = vals.map((v, i) => from[i] + (v - from[i]) * e);
+    repaintAll();
+    if (t < 1) tween = requestAnimationFrame(step);
+  };
+  tween = requestAnimationFrame(step);
+}
+
+// ---------------------------------------------------------------------------------------------
 function say(lv, title, text, busy) {
   statusEl.innerHTML = `<div class="ico b${lv}">${iconFor(lv)}</div>
     <div><h1 class="${busy ? 'spin' : ''}">${title}</h1><p>${text}</p></div>`;
@@ -132,7 +265,7 @@ function buildChips() {
     new Date(d + 'T12:00').toLocaleDateString(undefined, {weekday: 'short'}))].forEach((t, i) => {
     const b = document.createElement('button');
     b.textContent = t; b.className = i === sel ? 'on' : '';
-    b.onclick = () => { if (i === sel) return; anim = i > sel ? 1 : -1; sel = i; buildChips(); render(); anim = 'fade'; };
+    b.onclick = () => { if (i === sel) return; sel = i; buildChips(); render(true); };
     el.appendChild(b);
   });
 }
@@ -154,96 +287,59 @@ async function drive(a, b) {
 }
 const fmtTime = m => m < 60 ? `${Math.max(1, Math.round(m))} min` : `${Math.floor(m / 60)} h ${Math.round(m % 60)} min`;
 const fmtDrive = i => `${i.est ? '~' : ''}${Math.round(i.km)} km · ${i.est ? '~' : ''}${fmtTime(i.min)} drive`;
-let renderId = 0, sunInfo = null;
+const estimate = d => ({km: d * 1.3, min: d * 1.3 / 65 * 60, est: true});
 const sunLine = (best, info, night) => `Nearest sun: ${fmtDrive(info)} (${best.cloud}% cloud there).${night}`;
+let renderId = 0;
 
-function render() {
+function render(animate) {
   const rid = ++renderId;
-  const prev = layer;                         // keep the old map in place until the new one has animated over it
-  layer = L.layerGroup().addTo(map);
-  prev.eachLayer(l => { if (!(l instanceof L.ImageOverlay || l instanceof L.Rectangle)) prev.removeLayer(l); }); // only the colour fields linger
-  setTimeout(() => map.removeLayer(prev), 900);
-  const data = lastData = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
+  layer.clearLayers();
+  const data = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
+  const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
   let best = null;
   data.forEach(d => {
     d.lv = level(d.cloud); d.dist = km(me, d.pos);
     if (d.cloud <= SUNNY && (!best || d.dist < best.dist)) best = d;
   });
-  const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
-  if (styleMode === 'mondrian') drawMondrian(data);
-  else if (regions && regions.id === loadId) drawParcels(data);
-  else drawField(data);
+  setField(data.map(d => d.cloud), animate);
+  const when = ['now', 'today', 'tomorrow'][sel] || 'that day';
+  const night = sel === 0 && !here.day ? ' It is night there now.' : '';
+  let info = null;
   if (best && here.cloud > SUNNY) {
     L.polyline([me, best.pos], {color: '#111', weight: 2, dashArray: '2 7', lineCap: 'round'}).addTo(layer);
     const target = L.circleMarker(best.pos, {radius: 11, color: '#111', weight: 3, fillColor: '#fff', fillOpacity: 1}).addTo(layer);
-    const est = {km: best.dist * 1.3, min: best.dist * 1.3 / 65 * 60, est: true};
-    target.bindTooltip(fmtDrive(est), {permanent: true, direction: 'top', offset: [0, -10]});
-    drive(me, best.pos).then(info => {
+    info = estimate(best.dist);
+    target.bindTooltip(fmtDrive(info), {permanent: true, direction: 'top', offset: [0, -10]});
+    drive(me, best.pos).then(i => {
       if (rid !== renderId) return; // the view changed while routing
-      target.setTooltipContent(fmtDrive(info));
-      const p = statusEl.querySelector('p'); if (p) p.textContent = sunLine(best, info, night);
+      target.setTooltipContent(fmtDrive(i));
+      const p = statusEl.querySelector('p'); if (p) p.textContent = sunLine(best, i, night);
     });
-    sunInfo = est;
   }
-  const when = ['now', 'today', 'tomorrow'][sel] || 'that day';
-  const night = sel === 0 && !here.day ? ' It is night there now.' : '';
   L.marker(me, {icon: L.divIcon({className: '', iconSize: [20, 20], iconAnchor: [10, 10], html: '<div class="pin"></div>'}), interactive: false}).addTo(layer);
   if (here.cloud <= SUNNY) say(here.lv, `Sunny ${when}`, `${here.cloud}% cloud at your location.${night}`);
-  else if (best) say(here.lv, `${here.cloud}% cloud ${when}`, sunLine(best, sunInfo, night));
+  else if (best) say(here.lv, `${here.cloud}% cloud ${when}`, sunLine(best, info, night));
   else say(here.lv, `Cloudy ${when}`, `${here.cloud}% cloud here and no sun in this view. Zoom out or pan to look further.`);
   showPick();
 }
 
-// cloud % -> colour, orange (clear) through yellow and cyan to deep blue (overcast)
-const STOPS = [[0, [255, 106, 19]], [22, [253, 210, 47]], [42, [168, 228, 239]], [68, [59, 136, 212]], [100, [15, 76, 151]]];
-function colorFor(v) {
-  v = Math.max(0, Math.min(100, v));
-  let k = 1; while (v > STOPS[k][0]) k++;
-  const [a, ca] = STOPS[k - 1], [b, cb] = STOPS[k], t = (v - a) / (b - a);
-  return ca.map((x, i) => Math.round(x + (cb[i] - x) * t));
-}
-
-// cloud cover at a pixel of the grid's screen (bilinear between the grid points)
-function sample(data, px, py) {
-  const {cols, rows, size} = grid;
-  const fx = Math.max(0, Math.min(cols - 1, px / (size.x / cols) - .5)), fy = Math.max(0, Math.min(rows - 1, py / (size.y / rows) - .5));
-  const j = Math.min(Math.floor(fx), cols - 2), i = Math.min(Math.floor(fy), rows - 2), tx = fx - j, ty = fy - i;
-  const v = (r, c) => data[r * cols + c].cloud;
-  return (v(i, j) * (1 - tx) + v(i, j + 1) * tx) * (1 - ty) + (v(i + 1, j) * (1 - tx) + v(i + 1, j + 1) * tx) * ty;
-}
-
-// paint the whole view as a smooth field of flat colour bands and lay it over the map
-function drawField(data) {
-  const S = .5, W = Math.ceil(grid.size.x * S), H = Math.ceil(grid.size.y * S);
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d'), img = ctx.createImageData(W, H);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const col = colorFor(sample(data, x / S, y / S)), o = (y * W + x) * 4;
-    img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
-  L.imageOverlay(cv.toDataURL(), grid.bounds, {opacity: .8, interactive: false, className: 'field ' + animClass()}).addTo(layer);
-}
-
-// grid of points covering the visible map area
+// grid of weather points covering the visible map area
 function gridForView() {
   const size = map.getSize();
-  // aim for ~MAX_POINTS grid points, never closer than 52px apart
-  const cell = Math.max(52, Math.sqrt(size.x * size.y / MAX_POINTS));
+  const cell = Math.max(52, Math.sqrt(size.x * size.y / MAX_POINTS)); // never closer than 52px apart
   const cols = Math.max(3, Math.round(size.x / cell)), rows = Math.max(3, Math.round(size.y / cell));
   const out = [];
   for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
     const p = map.containerPointToLatLng([size.x * (j + .5) / cols, size.y * (i + .5) / rows]);
     out.push([p.lat, p.lng]);
   }
-  return {cols, rows, pts: out, size, bounds: map.getBounds(), zoom: map.getZoom(), pixelBounds: map.getPixelBounds()};
+  return {cols, rows, pts: out, size, zoom: map.getZoom(), pixelBounds: map.getPixelBounds()};
 }
 
 async function load() {
   const id = ++loadId;
   say(1, 'Checking the sky…', 'Fetching cloud cover for this view.', true);
   const g = gridForView();
-  const reg = buildRegions(g);
   const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover' +
     '&forecast_days=7&timezone=auto' +
     '&latitude=' + g.pts.map(p => p[0].toFixed(3)).join(',') +
@@ -252,7 +348,7 @@ async function load() {
     const res = await (await fetch(url)).json();
     if (res.error) throw new Error(res.reason);
     if (id !== loadId) return; // the view moved again; a newer load is in flight
-    pts = g.pts; grid = g; regions = null;
+    pts = g.pts; grid = g;
     series = (Array.isArray(res) ? res : [res]).map(r => {
       const t = r.hourly.time, c = r.hourly.cloud_cover, byDay = {};
       t.forEach((ts, i) => {
@@ -264,171 +360,41 @@ async function load() {
         daily: days.map(d => Math.round(byDay[d].reduce((a, b) => a + b) / byDay[d].length))};
     });
     buildChips();
-    render();
-    reg.then(r => { if (r && id === loadId) { regions = Object.assign(r, {id}); render(); } }); // swap in the parcel look once tiles are read
+    render(false);
   } catch (e) { if (id === loadId) say(4, 'Could not load weather', e.message); }
 }
 
-// ---- Mondrian look: same-level neighbours merge into rectangles split by thick black lines ----
-const MONDRIAN = ['#d92b1c', '#f6cf1a', '#ffffff', '#ffffff', '#1d4f9f']; // red, yellow, white, white, blue by level
-
-// is more than half of this screen rectangle open water (per the basemap tiles)?
-function isSea(x, y, w, h) {
-  if (!regions || regions.id !== loadId) return false;
-  let n = 0, wet = 0;
-  for (let yy = Math.floor(y); yy < Math.min(regions.H, y + h); yy += 3)
-    for (let xx = Math.floor(x); xx < Math.min(regions.W, x + w); xx += 3) { n++; wet += regions.water[yy * regions.W + xx]; }
-  return n > 0 && wet / n > .5;
-}
-
-function drawMondrian(sampled) {
-  const {size} = grid, px = Math.max(22, cellPxFor(grid.zoom));
-  const cols = Math.max(3, Math.round(size.x / px)), rows = Math.max(3, Math.round(size.y / px)), cw = size.x / cols, ch = size.y / rows;
-  const data = [];
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-    const cloud = Math.round(sample(sampled, (c + .5) * cw, (r + .5) * ch));
-    data.push({cloud, lv: level(cloud), sea: isSea(c * cw, r * ch, cw, ch)});
-  }
-  const seen = new Set(), at = (r, c) => r * cols + c;
-  const nw = map.latLngToLayerPoint(grid.bounds.getNorthWest());
-  const ll = (x, y) => map.layerPointToLatLng(L.point(nw.x + x, nw.y + y));
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-    if (seen.has(at(r, c))) continue;
-    if (data[at(r, c)].sea) { seen.add(at(r, c)); continue; }
-    const lv = MONDRIAN[data[at(r, c)].lv];
-    const ok = (rr, cc) => cc < cols && rr < rows && !seen.has(at(rr, cc)) && !data[at(rr, cc)].sea && MONDRIAN[data[at(rr, cc)].lv] === lv;
-    let w = 1; while (ok(r, c + w)) w++;
-    let h = 1; while ([...Array(w).keys()].every(i => ok(r + h, c + i))) h++;
-    const mem = [];
-    for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) { seen.add(at(r + i, c + j)); mem.push(data[at(r + i, c + j)]); }
-    const avg = Math.round(mem.reduce((a, m) => a + m.cloud, 0) / mem.length);
-    const rect = L.rectangle([ll(c * cw, r * ch), ll((c + w) * cw, (r + h) * ch)], {color: '#111', weight: 5, opacity: 1,
-      fillColor: lv, fillOpacity: lv === '#ffffff' ? .9 : .96, lineJoin: 'miter', className: 'anim-fade'})
-      .bindTooltip(`${avg}% cloud`).addTo(layer);
-    const el = rect.getElement(); // stagger the blocks across the screen in the direction of travel
-    if (el) el.style.animationDelay = Math.round(((anim === -1 ? cols - 1 - c : c) / cols) * 350) + 'ms';
-  }
-}
-
-let styleMode = 'parcels';
-try { styleMode = localStorage.getItem('sunStyle') || 'parcels'; } catch (e) {}
-const styleBtn = document.getElementById('style');
-const paintStyle = () => { styleBtn.textContent = styleMode === 'mondrian' ? 'Style: Mondrian' : 'Style: Parcels'; };
-paintStyle();
-styleBtn.onclick = () => {
-  styleMode = styleMode === 'mondrian' ? 'parcels' : 'mondrian';
-  try { localStorage.setItem('sunStyle', styleMode); } catch (e) {}
-  paintStyle(); if (series.length) render();
-};
-
-// ---- parcel look: the basemap's roads become white lines, the blocks between them get a flat colour each ----
-// on-screen size of the squares: smaller when zoomed out, so the map shows finer detail across a wide area
-// (the weather itself is still sampled on the coarser grid and interpolated)
-const cellPxFor = z => Math.max(14, Math.min(60, Math.round(44 + (z - 9) * 6)));
-let regions = null;
-
-function loadTile(z, x, y) {
-  return new Promise(res => {
-    const im = new Image(); im.crossOrigin = 'anonymous';
-    im.onload = () => res(im); im.onerror = () => res(null);
-    im.src = `https://tile.openstreetmap.org/${z}/${((x % 2 ** z) + 2 ** z) % 2 ** z}/${y}.png`;
-  });
-}
-
-async function buildRegions(g) {
-  const W = Math.round(g.size.x), H = Math.round(g.size.y), z = g.zoom, pb = g.pixelBounds, CELL = cellPxFor(z);
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d', {willReadFrequently: true});
-  const jobs = [];
-  for (let tx = Math.floor(pb.min.x / 256); tx <= Math.floor(pb.max.x / 256); tx++)
-    for (let ty = Math.floor(pb.min.y / 256); ty <= Math.floor(pb.max.y / 256); ty++)
-      if (ty >= 0 && ty < 2 ** z) jobs.push(loadTile(z, tx, ty).then(im => im && ctx.drawImage(im, tx * 256 - pb.min.x, ty * 256 - pb.min.y)));
-  await Promise.all(jobs);
-  let px;
-  try { px = ctx.getImageData(0, 0, W, H).data; } catch (e) { return null; } // tainted canvas: keep the smooth field
-  // road = white fill or warm road colours; dilate once so thin gaps close
-  const road = new Uint8Array(W * H), water = new Uint8Array(W * H);
-  for (let i = 0; i < W * H; i++) {
-    const r = px[i * 4], gg = px[i * 4 + 1], b = px[i * 4 + 2], a = px[i * 4 + 3];
-    if (a > 200 && Math.abs(r - 170) < 14 && Math.abs(gg - 211) < 12 && Math.abs(b - 223) < 12) { water[i] = 1; continue; } // OSM sea / lake blue
-    road[i] = a < 200 || (r > 246 && gg > 246 && b > 246) || (r - b > 40 && r > 200) ? 1 : 0;
-  }
-  const mask = new Uint8Array(road);
-  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
-    const i = y * W + x;
-    if (road[i - 1] || road[i + 1] || road[i - W] || road[i + W]) mask[i] = 1;
-  }
-  for (let i = 0; i < W * H; i++) if (water[i]) mask[i] = 1; // squares stay on land
-  const lab = new Int32Array(W * H).fill(-1), sx = [], sy = [], cnt = [], stack = [];
-  for (let i0 = 0; i0 < W * H; i0++) {
-    if (mask[i0] || lab[i0] >= 0) continue;
-    const id = cnt.length, cx = Math.floor((i0 % W) / CELL), cy = Math.floor(Math.floor(i0 / W) / CELL);
-    let n = 0, ax = 0, ay = 0; stack.length = 0; stack.push(i0); lab[i0] = id;
-    while (stack.length) {
-      const i = stack.pop(), x = i % W, y = (i - x) / W; n++; ax += x; ay += y;
-      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1]) {
-        if (j < 0 || mask[j] || lab[j] >= 0) continue;
-        const jx = j % W, jy = (j - jx) / W;
-        if (Math.floor(jx / CELL) !== cx || Math.floor(jy / CELL) !== cy) continue;
-        lab[j] = id; stack.push(j);
-      }
-    }
-    sx.push(ax / n); sy.push(ay / n); cnt.push(n);
-  }
-  return {lab, sx, sy, W, H, water};
-}
-
-function drawParcels(data) {
-  const {lab, sx, sy, W, H, water} = regions;
-  const cols = sx.map((x, l) => {
-    const noise = ((Math.imul(l + 1, 2654435761) >>> 0) / 4294967296 - .5) * 26; // slight patchiness
-    return colorFor(sample(data, sx[l], sy[l]) + noise);
-  });
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d'), img = ctx.createImageData(W, H);
-  for (let i = 0; i < W * H; i++) {
-    if (water[i]) continue; // leave the sea transparent so the plain map shows
-    const c = lab[i] < 0 ? [255, 255, 255] : cols[lab[i]];
-    img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2]; img.data[i * 4 + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
-  L.imageOverlay(cv.toDataURL(), grid.bounds, {opacity: 1, interactive: false, className: animClass()}).addTo(layer);
-}
-
 // tap anywhere: mark the spot with its cloud cover, plus distance and drive time from you
-let lastData = [], pick = null, refreshing = false;
+let pick = null, refreshing = false;
 const pickGroup = L.layerGroup().addTo(map);
-const cloudAt = ll => {
-  const nw = map.latLngToLayerPoint(grid.bounds.getNorthWest()), p = map.latLngToLayerPoint(ll);
-  return Math.round(sample(lastData, p.x - nw.x, p.y - nw.y));
-};
+const cloudAt = ll => { const p = map.project(ll, grid.zoom); return Math.round(sample(fieldVals, p.x - grid.pixelBounds.min.x, p.y - grid.pixelBounds.min.y)); };
 const pickHtml = (cloud, info) => `<b>${cloud}% cloud</b><br>${fmtDrive(info)}`;
 
 function showPick() {
-  if (!pick || !lastData.length || !me) return;
+  if (!pick || !fieldVals || !me) return;
   const at = pick, cloud = cloudAt(at), d = km(me, [at.lat, at.lng]);
   refreshing = true; pickGroup.clearLayers();
   L.polyline([me, at], {color: '#111', weight: 2, dashArray: '2 7', lineCap: 'round', interactive: false}).addTo(pickGroup);
   const m = L.circleMarker(at, {radius: 9, color: '#111', weight: 3, fillColor: '#fff', fillOpacity: 1}).addTo(pickGroup);
-  m.bindPopup(pickHtml(cloud, {km: d * 1.3, min: d * 1.3 / 65 * 60, est: true}), {closeButton: false, offset: [0, -4]}).openPopup();
+  m.bindPopup(pickHtml(cloud, estimate(d)), {closeButton: false, offset: [0, -4]}).openPopup();
   refreshing = false;
   drive(me, [at.lat, at.lng]).then(info => { if (pick === at) m.setPopupContent(pickHtml(cloud, info)); });
 }
 map.on('click', e => { pick = e.latlng; showPick(); });
 map.on('popupclose', () => { if (!refreshing) { pick = null; pickGroup.clearLayers(); } });
 
-// reload the grid once the user stops panning or zooming
+// reload the weather once the user stops panning or zooming
 map.on('moveend', () => { if (me) { clearTimeout(timer); timer = setTimeout(load, 700); } });
 
 const locBtn = document.getElementById('locate');
-locBtn.innerHTML = svg('<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>');
+locBtn.innerHTML = ICONS.locate;
 // jump back to the user's position (fresh fix) and zoom in on it
 locBtn.onclick = () => {
   if (!navigator.geolocation) return;
   locBtn.classList.add('busy');
   navigator.geolocation.getCurrentPosition(
-    p => { locBtn.classList.remove('busy'); me = [p.coords.latitude, p.coords.longitude]; map.flyTo(me, 9); },
-    () => { locBtn.classList.remove('busy'); if (me) map.flyTo(me, 9); },
+    p => { locBtn.classList.remove('busy'); me = [p.coords.latitude, p.coords.longitude]; map.flyTo(me, 10); },
+    () => { locBtn.classList.remove('busy'); if (me) map.flyTo(me, 10); },
     {enableHighAccuracy: true, timeout: 10000, maximumAge: 30000});
 };
 
@@ -436,7 +402,7 @@ function locate() {
   say(1, 'Finding you…', 'Allow location access to see the sun near you.', true);
   if (!navigator.geolocation) { say(4, 'No location support', 'This browser cannot share your location.'); return; }
   navigator.geolocation.getCurrentPosition(
-    p => { me = [p.coords.latitude, p.coords.longitude]; map.setView(me, 8); },
+    p => { me = [p.coords.latitude, p.coords.longitude]; map.setView(me, 10); },
     e => say(4, 'Location unavailable', e.message),
     {enableHighAccuracy: false, timeout: 15000});
 }
