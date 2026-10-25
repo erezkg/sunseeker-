@@ -42,6 +42,10 @@
     padding:9px 14px;border-radius:999px;cursor:pointer;transition:background .2s,color .2s}
   #days button.on{background:var(--ink);color:var(--bg)}
 
+  #locate{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 128px);width:46px;height:46px;
+    border-radius:50%;display:grid;place-items:center;color:var(--ink);cursor:pointer;padding:0}
+  #locate svg{width:22px;height:22px}
+  #locate.busy svg{animation:pulse 1s ease-in-out infinite}
   #legend{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 78px);border-radius:14px;
     padding:8px 11px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
   #legend span{display:flex;align-items:center;gap:4px}
@@ -68,6 +72,7 @@
 <div id="map"></div>
 <div id="status" class="glass"></div>
 <div id="legend" class="glass"></div>
+<button id="locate" class="glass" aria-label="Centre on my location"></button>
 <div id="days" class="glass"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
@@ -218,6 +223,18 @@ map.on('click', e => {
 
 // reload the grid once the user stops panning or zooming
 map.on('moveend', () => { if (me) { clearTimeout(timer); timer = setTimeout(load, 700); } });
+
+const locBtn = document.getElementById('locate');
+locBtn.innerHTML = svg('<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>');
+// jump back to the user's position (fresh fix) and zoom in on it
+locBtn.onclick = () => {
+  if (!navigator.geolocation) return;
+  locBtn.classList.add('busy');
+  navigator.geolocation.getCurrentPosition(
+    p => { locBtn.classList.remove('busy'); me = [p.coords.latitude, p.coords.longitude]; map.flyTo(me, 9); },
+    () => { locBtn.classList.remove('busy'); if (me) map.flyTo(me, 9); },
+    {enableHighAccuracy: true, timeout: 10000, maximumAge: 30000});
+};
 
 function locate() {
   say(1, 'Finding you…', 'Allow location access to see the sun near you.', true);
