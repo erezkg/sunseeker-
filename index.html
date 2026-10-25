@@ -22,8 +22,13 @@
   .glass{background:var(--card);backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
     border:1px solid var(--line);box-shadow:var(--shadow)}
 
-  #status{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;max-width:420px;
-    border-radius:20px;padding:14px 16px;display:flex;gap:14px;align-items:center}
+  /* every control lives in one stack along the top edge */
+  #top{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;max-width:520px;
+    display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  #top>*{pointer-events:auto}
+  #toolbar{display:flex;gap:8px;align-items:center;pointer-events:none}
+  #toolbar>*{pointer-events:auto}
+  #status{border-radius:20px;padding:14px 16px;display:flex;gap:14px;align-items:center}
   #status .ico{flex:none;width:46px;height:46px;border-radius:6px;display:grid;place-items:center;background:var(--c);border:2px solid #111}
   #status .ico svg{width:26px;height:26px}
   .ico.b0,.ico.b4{color:#fff}.ico.b1,.ico.b2,.ico.b3{color:#1d1d1f}
@@ -35,18 +40,17 @@
   @keyframes pulse{50%{opacity:.35}}
   @keyframes fadein{from{opacity:0}}
 
-  #days{position:absolute;z-index:1000;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 14px);
-    max-width:520px;border-radius:999px;padding:5px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+  #days{flex:1;min-width:0;border-radius:999px;padding:5px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
   #days::-webkit-scrollbar{display:none}
   #days button{flex:1 0 auto;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:550;
     padding:9px 14px;border-radius:999px;cursor:pointer;transition:background .2s,color .2s}
   #days button.on{background:#111;color:#fff}
 
-  #locate{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 128px);width:46px;height:46px;
+  #locate{flex:none;width:46px;height:46px;
     border-radius:50%;display:grid;place-items:center;color:var(--ink);cursor:pointer;padding:0}
   #locate svg{width:22px;height:22px}
   #locate.busy svg{animation:pulse 1s ease-in-out infinite}
-  #legend{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 78px);border-radius:14px;
+  #legend{align-self:flex-start;border-radius:14px;
     padding:8px 11px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
   #legend span{display:flex;align-items:center;gap:4px}
   #legend i{width:14px;height:14px;display:inline-block;background:var(--c);border:1.5px solid #111}
@@ -66,10 +70,14 @@
 </head>
 <body>
 <div id="map"></div>
-<div id="status" class="glass"></div>
-<div id="legend" class="glass"></div>
-<button id="locate" class="glass" aria-label="Centre on my location"></button>
-<div id="days" class="glass"></div>
+<div id="top">
+  <div id="status" class="glass"></div>
+  <div id="toolbar">
+    <div id="days" class="glass"></div>
+    <button id="locate" class="glass" aria-label="Centre on my location"></button>
+  </div>
+  <div id="legend" class="glass"></div>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 const SPACING_PX = 72;   // weather points sit on a fixed lat/lng lattice, about this far apart on screen
@@ -400,7 +408,8 @@ async function loadCities() {
 function drawCities() {
   cityLayer.clearLayers();
   if (!wx.size) return;
-  const size = map.getSize(), taken = [[0, 0, size.x, 96], [0, size.y - 70, size.x, size.y]]; // keep clear of the status card and day bar
+  const size = map.getSize(), topH = document.getElementById('top').getBoundingClientRect().bottom + 6;
+  const taken = [[0, 0, size.x, topH], [0, size.y - 24, size.x, size.y]]; // keep clear of the controls and the credits line
   if (me) { const m = map.latLngToContainerPoint(me); taken.push([m.x - 14, m.y - 14, m.x + 14, m.y + 14]); } // and of your own dot
   let n = 0;
   for (const c of cities) {
