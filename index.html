@@ -182,6 +182,7 @@ function hash3(a, b, c) {
 // ---- weather store: points on a fixed lat/lng lattice, cached so panning only fetches what is new ----
 const wx = new Map();                 // "step:i:j" -> {now, day, daily[], t}; point (i, j) sits at lng i*step, lat j*step
 let stepDeg = 0.1, dayList = [], selFrom = 0, selTo = 0, mix = 1;   // selFrom -> selTo is the day-switch blend
+let wxVersion = 0;                    // bumped whenever new weather arrives, so cached per-tile grids refresh
 const wkey = (s, i, j) => `${s}:${i}:${j}`;
 const pval = (p, k) => k === 0 ? p.now : p.daily[k - 1];
 const fresh = k => { const p = wx.get(k); return !!p && Date.now() - p.t < KEEP_MS; };
@@ -191,18 +192,20 @@ function pickStep() {
   return STEPS.find(s => s >= need) || STEPS[STEPS.length - 1];
 }
 
-function wxVal(s, i, j) {
+// value of one lattice point: for day k if given, otherwise the current (possibly mid-switch) blend
+function wxVal(s, i, j, k) {
   const p = wx.get(wkey(s, i, j)); if (!p) return null;
+  if (k !== undefined) return pval(p, k);
   const a = pval(p, selFrom), b = pval(p, selTo);
   return a + (b - a) * mix;
 }
 
 // bilinear cloud cover between the surrounding lattice points at one spacing (ignoring ones not fetched)
-function bilinear(s, lat, lng, strict) {
+function bilinear(s, lat, lng, strict, k) {
   const fi = lng / s, fj = lat / s, i0 = Math.floor(fi), j0 = Math.floor(fj), tx = fi - i0, ty = fj - j0;
   let sum = 0, wsum = 0;
   for (const [di, dj, w] of [[0, 0, (1 - tx) * (1 - ty)], [1, 0, tx * (1 - ty)], [0, 1, (1 - tx) * ty], [1, 1, tx * ty]]) {
-    const v = wxVal(s, i0 + di, j0 + dj);
+    const v = wxVal(s, i0 + di, j0 + dj, k);
     if (v == null) { if (strict) return null; continue; }
     if (w > 0) { sum += v * w; wsum += w; }
   }
@@ -211,10 +214,10 @@ function bilinear(s, lat, lng, strict) {
 
 // cloud cover anywhere: the finest lattice that fully surrounds the point wins, whatever the zoom level, so a
 // place keeps its value as you zoom out; otherwise the nearest spacing with any data
-function cloudLL(lat, lng) {
-  for (const s of STEPS) { const v = bilinear(s, lat, lng, true); if (v != null) return v; }
+function cloudLL(lat, lng, k) {
+  for (const s of STEPS) { const v = bilinear(s, lat, lng, true, k); if (v != null) return v; }
   const order = [stepDeg, ...STEPS.filter(s => s !== stepDeg).sort((a, b) => Math.abs(Math.log(a / stepDeg)) - Math.abs(Math.log(b / stepDeg)))];
-  for (const s of order) { const v = bilinear(s, lat, lng, false); if (v != null) return v; }
+  for (const s of order) { const v = bilinear(s, lat, lng, false, k); if (v != null) return v; }
   return null;
 }
 
@@ -240,13 +243,50 @@ function featureColor(v, u) {
   return u < pB ? BLUE : u < pB + pSun * .7 ? YELLOW : u < pB + pSun ? RED : PAPER;
 }
 
-// colour of whatever sits at this point (global pixels of zoom z); the random pick is seeded by its real-world
-// ~100 m cell, so a building or park keeps its colour at every zoom level
+// colour of a Mondrian feature; the random pick is seeded by its real-world ~100 m cell, so a building or park
+// keeps its colour at every zoom level
 const CELL_DEG = .001;
-function spotColor(gx, gy, z) {
-  if (!wx.size) return PAPER;
-  const ll = map.unproject(L.point(gx, gy), z);
-  return featureColor(cloudLL(ll.lat, ll.lng), hash3(Math.floor(ll.lat / CELL_DEG), Math.floor(ll.lng / CELL_DEG), 1));
+const spotColor = (v, lat, lng) => featureColor(v, hash3(Math.floor(lat / CELL_DEG), Math.floor(lng / CELL_DEG), 1));
+
+// Per-tile lookup grids, so painting never asks the weather store per lot. Every 32 tile pixels (16 screen px)
+// we keep the latitude / longitude (fixed for the tile; in this projection lat depends only on y and lng only on
+// x) and the cloud cover there (refreshed on each paint); lots read them by bilinear blending.
+const TG = 17;
+function tileGrid(st) {
+  if (!st.glat) {
+    st.glat = new Float64Array(TG); st.glng = new Float64Array(TG);
+    for (let k = 0; k < TG; k++) {
+      const p = map.unproject(L.point(st.x * 256 + k * 16, st.y * 256 + k * 16), st.z);
+      st.glat[k] = p.lat; st.glng[k] = p.lng;
+    }
+  }
+  const a = dayGrid(st, selFrom);
+  if (selFrom === selTo || mix >= 1) return mix >= 1 ? dayGrid(st, selTo) : a;
+  const b = dayGrid(st, selTo), out = new Float32Array(TG * TG);
+  for (let q = 0; q < TG * TG; q++) out[q] = a[q] + (b[q] - a[q]) * mix;   // NaN stays NaN
+  return out;
+}
+// the grid for one day, cached on the tile until new weather arrives or the lattice spacing changes
+function dayGrid(st, day) {
+  const key = `${day}|${wxVersion}|${stepDeg}`;
+  if (!st.gcache || st.gcacheV !== `${wxVersion}|${stepDeg}`) { st.gcache = {}; st.gcacheV = `${wxVersion}|${stepDeg}`; }
+  if (st.gcache[key]) return st.gcache[key];
+  const vals = new Float32Array(TG * TG).fill(NaN);
+  if (wx.size) for (let j = 0; j < TG; j++) for (let k = 0; k < TG; k++) {
+    const v = cloudLL(st.glat[j], st.glng[k], day);
+    if (v != null) vals[j * TG + k] = v;
+  }
+  return st.gcache[key] = vals;
+}
+const gridLat = (st, py) => { const f = Math.min(TG - 1.001, py / 32), j = f | 0; return st.glat[j] + (st.glat[j + 1] - st.glat[j]) * (f - j); };
+const gridLng = (st, px) => { const f = Math.min(TG - 1.001, px / 32), k = f | 0; return st.glng[k] + (st.glng[k + 1] - st.glng[k]) * (f - k); };
+function gridCloud(vals, px, py) {
+  const fx = Math.min(TG - 1.001, px / 32), fy = Math.min(TG - 1.001, py / 32), k = fx | 0, j = fy | 0, tx = fx - k, ty = fy - j;
+  const a = vals[j * TG + k], b = vals[j * TG + k + 1], c = vals[(j + 1) * TG + k], d = vals[(j + 1) * TG + k + 1];
+  if (a === a && b === b && c === c && d === d) return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+  let sum = 0, w = 0;                      // some corners missing (NaN): blend what is there
+  for (const [v, ww] of [[a, (1 - tx) * (1 - ty)], [b, tx * (1 - ty)], [c, (1 - tx) * ty], [d, tx * ty]]) if (v === v) { sum += v * ww; w += ww; }
+  return w > 0 ? sum / w : null;
 }
 
 // OSM road fills (motorway, trunk, primary, secondary); their casings are the only strongly saturated colours on the map
@@ -386,38 +426,34 @@ if (!STYLES[styleKey]) styleKey = 'sun';
 
 // colour of one lot: its cloud level picks the shade family; small lots vary within it, big or tile-cut ones
 // take the family's first shade so neighbouring tiles agree
-function lotColor(sty, gx, gy, z, plain) {
-  if (!wx.size) return sty.noneC;
-  const ll = map.unproject(L.point(gx, gy), z), v = cloudLL(ll.lat, ll.lng);
+function lotColor(sty, v, lat, lng, plain) {
   if (v == null) return sty.noneC;
   if (sty.steps) return sty.steps[sunStep(v)];
   if (sty.ramp) return pack(...rampRGB(sty.ramp, v));
   const fam = sty.bands[level(v)];
-  return plain ? fam[0] : fam[Math.floor(hash3(Math.floor(ll.lat / .0003), Math.floor(ll.lng / .0003), 2) * fam.length)];
+  return plain ? fam[0] : fam[Math.floor(hash3(Math.floor(lat / .0003), Math.floor(lng / .0003), 2) * fam.length)];
 }
 
 function paintLots(canvas, sty) {
   const st = canvas._st;
   if (!st.plab) Object.assign(st, labelPaper(st.cls));
-  const {cls, lab, cx, cy, area, plab, pcx, pcy, parea, pedge} = st, z = st.z, ox = st.x * 256, oy = st.y * 256;
+  const {cls, lab, cx, cy, area, plab, pcx, pcy, parea, pedge} = st, vals = tileGrid(st);
   const pcol = new Uint32Array(parea.length), fcol = new Uint32Array(area.length);
-  for (let p = 0; p < parea.length; p++) pcol[p] = lotColor(sty, ox + pcx[p] / 2, oy + pcy[p] / 2, z, pedge[p] || parea[p] > HUGE);
-  for (let l = 0; l < area.length; l++) fcol[l] = lotColor(sty, ox + cx[l] / 2, oy + cy[l] / 2, z, area[l] > HUGE);
-  const ctx = canvas.getContext('2d'), img = ctx.createImageData(N, N), out = new Uint32Array(img.data.buffer);
+  for (let p = 0; p < parea.length; p++)
+    pcol[p] = lotColor(sty, gridCloud(vals, pcx[p], pcy[p]), gridLat(st, pcy[p]), gridLng(st, pcx[p]), pedge[p] || parea[p] > HUGE);
+  for (let l = 0; l < area.length; l++)
+    fcol[l] = lotColor(sty, gridCloud(vals, cx[l], cy[l]), gridLat(st, cy[l]), gridLng(st, cx[l]), area[l] > HUGE);
+  const {ctx, img, out} = tileBuf(canvas);
   if (sty.smooth) {
-    // watercolour: ramp colours at the corners of 16px blocks, blended per pixel, each lot a touch lighter or darker
-    const G = 33, grid = new Float32Array(G * G * 3);
-    for (let j = 0; j < G; j++) for (let k = 0; k < G; k++) {
-      const ll = map.unproject(L.point(ox + k * 8, oy + j * 8), z), v = wx.size ? cloudLL(ll.lat, ll.lng) : null;
-      const c = v == null ? [238, 238, 236] : rampRGB(sty.ramp, v);
-      grid.set(c, (j * G + k) * 3);
-    }
+    // watercolour: ramp colours at the grid corners (every 32px), blended per pixel, each lot a touch lighter or darker
+    const G = TG, grid = new Float32Array(G * G * 3);
+    for (let q = 0; q < G * G; q++) grid.set(vals[q] === vals[q] ? rampRGB(sty.ramp, vals[q]) : [238, 238, 236], q * 3);
     const shadeOf = (id, salt) => .92 + hash3(id, salt, st.x * 7 + st.y) * .16;
     const pshade = parea.map((_, p) => shadeOf(p, 1)), fshade = area.map((_, l) => shadeOf(l, 2));
     for (let i = 0; i < N * N; i++) {
       const c = cls[i];
       if (c !== 0 && c !== 3) { out[i] = c === 2 ? sty.waterC : sty.streetC; continue; }
-      const x = i & 511, y = i >> 9, fx = x / 16, fy = y / 16, k0 = Math.min(31, fx | 0), j0 = Math.min(31, fy | 0), tx = fx - k0, ty = fy - j0;
+      const x = i & 511, y = i >> 9, fx = x / 32, fy = y / 32, k0 = Math.min(TG - 2, fx | 0), j0 = Math.min(TG - 2, fy | 0), tx = fx - k0, ty = fy - j0;
       const s = c === 0 ? pshade[plab[i]] : fshade[lab[i]], a = (j0 * G + k0) * 3, b = a + 3, d = a + G * 3, e = d + 3;
       const ch = o => Math.min(255, ((grid[a+o] * (1 - tx) + grid[b+o] * tx) * (1 - ty) + (grid[d+o] * (1 - tx) + grid[e+o] * tx) * ty) * s) | 0;
       out[i] = pack(ch(0), ch(1), ch(2));
@@ -431,27 +467,35 @@ function paintLots(canvas, sty) {
   ctx.putImageData(img, 0, 0);
 }
 
+// each tile keeps one pixel buffer for repaints instead of allocating a fresh 1 MB image every time
+function tileBuf(canvas) {
+  if (!canvas._buf) {
+    const ctx = canvas.getContext('2d'), img = ctx.createImageData(N, N);
+    canvas._buf = {ctx, img, out: new Uint32Array(img.data.buffer)};
+  }
+  return canvas._buf;
+}
+
 const HUGE = 30000;   // patches bigger than this are split into 128px cells so open land is not one flat slab
 
 function paintTile(canvas) {
   const st = canvas._st; if (!st) return;
   if (styleKey !== 'mondrian') return paintLots(canvas, STYLES[styleKey]);
-  const {cls, lab, cx, cy, area} = st, z = st.z, ox = st.x * 256, oy = st.y * 256;
+  const {cls, lab, cx, cy, area} = st, vals = tileGrid(st);
   const cols = new Uint32Array(area.length), huge = [];
   for (let l = 0; l < area.length; l++) {
     if (area[l] < 14) { cols[l] = PAPER; continue; }    // label text and anti-aliasing crumbs
-    const gx = ox + cx[l] / 2, gy = oy + cy[l] / 2;
     if (area[l] > HUGE) {
       const cells = new Uint32Array(16);
       for (let c = 0; c < 16; c++) {
         const px = (c & 3) * 128 + 64, py = (c >> 2) * 128 + 64;
-        cells[c] = spotColor(ox + px / 2, oy + py / 2, z);
+        cells[c] = spotColor(gridCloud(vals, px, py), gridLat(st, py), gridLng(st, px));
       }
       huge[l] = cells; continue;
     }
-    cols[l] = spotColor(gx, gy, z);
+    cols[l] = spotColor(gridCloud(vals, cx[l], cy[l]), gridLat(st, cy[l]), gridLng(st, cx[l]));
   }
-  const ctx = canvas.getContext('2d'), img = ctx.createImageData(N, N), out = new Uint32Array(img.data.buffer);
+  const {ctx, img, out} = tileBuf(canvas);
   for (let i = 0; i < N * N; i++) {
     const c = cls[i];
     out[i] = c === 1 ? LINE : c === 2 ? WATER : c === 3 ? (huge[lab[i]] ? huge[lab[i]][(((i >> 9) >> 7) << 2) | ((i & 511) >> 7)] : cols[lab[i]]) : PAPER;
@@ -468,12 +512,70 @@ function loadTile(z, x, y) {
   });
 }
 
+// ---- tile analysis in background workers: the page loads the OSM tile images (the tile servers only accept
+// ordinary image requests) and hands the decoded pictures to a worker, which sorts the pixels off the main
+// thread so panning stays smooth; browsers without OffscreenCanvas fall back to doing it all here ----
+const WORKER_SRC = `
+const N = ${N}; const ROAD_FILLS = ${JSON.stringify(ROAD_FILLS)}; const isStreet = ${isStreet};
+${classify}
+${dropSpecks}
+${label}
+${labelPaper}
+onmessage = e => {
+  const {id, z, deep, bitmaps} = e.data;
+  try {
+    const cv = new OffscreenCanvas(N, N), ctx = cv.getContext('2d', {willReadFrequently: true});
+    bitmaps.forEach((b, k) => { if (!b) return; deep ? ctx.drawImage(b, (k & 1) * 256, (k >> 1) * 256) : ctx.drawImage(b, 0, 0, N, N); b.close(); });
+    const {cls, key} = classify(ctx.getImageData(0, 0, N, N).data, deep ? z + 1 : z);
+    const F = label(cls, key), P = labelPaper(cls);
+    const r = {id, cls, lab: F.lab, cx: Float32Array.from(F.cx), cy: Float32Array.from(F.cy), area: Int32Array.from(F.area),
+      plab: P.plab, pcx: Float32Array.from(P.pcx), pcy: Float32Array.from(P.pcy), parea: Int32Array.from(P.parea), pedge: Uint8Array.from(P.pedge)};
+    postMessage(r, [r.cls, r.lab, r.cx, r.cy, r.area, r.plab, r.pcx, r.pcy, r.parea, r.pedge].map(a => a.buffer));
+  } catch (err) { postMessage({id, error: String(err)}); }
+};`;
+const workers = [], pendingTiles = new Map();
+let jobSeq = 0;
+try {
+  if (window.Worker && typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap === 'function' && new OffscreenCanvas(1, 1).getContext('2d')) {
+    const url = URL.createObjectURL(new Blob([WORKER_SRC], {type: 'text/javascript'}));
+    for (let i = 0; i < Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1)); i++) {
+      const w = new Worker(url);
+      w.onmessage = e => { const cb = pendingTiles.get(e.data.id); pendingTiles.delete(e.data.id); if (cb) cb(e.data); };
+      workers.push(w);
+    }
+  }
+} catch (e) { workers.length = 0; }
+async function analyse(coords, deep) {
+  const imgs = await Promise.all(deep
+    ? [0, 1, 2, 3].map(k => loadTile(coords.z + 1, coords.x * 2 + (k & 1), coords.y * 2 + (k >> 1)))
+    : [loadTile(coords.z, coords.x, coords.y)]);
+  const bitmaps = await Promise.all(imgs.map(im => im ? createImageBitmap(im).catch(() => null) : null));
+  return new Promise(res => {
+    const id = ++jobSeq;
+    pendingTiles.set(id, res);
+    workers[id % workers.length].postMessage({id, z: coords.z, deep, bitmaps}, bitmaps.filter(Boolean));
+  });
+}
+
 const SunTiles = L.GridLayer.extend({
   createTile(coords, done) {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = N;
+    const deep = coords.z < MAX_ZOOM;          // use the next zoom level for double resolution (stops before house numbers)
+    if (workers.length) {
+      analyse(coords, deep).then(r => {
+        if (r.error) { this._analyseHere(coords, deep, canvas, done); return; }
+        delete r.id;
+        canvas._st = Object.assign(r, {z: coords.z, x: coords.x, y: coords.y});
+        paintTile(canvas);
+        done(null, canvas);
+      });
+    } else this._analyseHere(coords, deep, canvas, done);
+    return canvas;
+  },
+  // main-thread fallback
+  _analyseHere(coords, deep, canvas, done) {
     const src = document.createElement('canvas'); src.width = src.height = N;
     const sctx = src.getContext('2d', {willReadFrequently: true});
-    const deep = coords.z < MAX_ZOOM;          // use the next zoom level for double resolution (stops before house numbers)
     const jobs = deep
       ? [0, 1, 2, 3].map(k => loadTile(coords.z + 1, coords.x * 2 + (k & 1), coords.y * 2 + (k >> 1)).then(im => im && sctx.drawImage(im, (k & 1) * 256, (k >> 1) * 256)))
       : [loadTile(coords.z, coords.x, coords.y).then(im => im && sctx.drawImage(im, 0, 0, N, N))];
@@ -485,27 +587,41 @@ const SunTiles = L.GridLayer.extend({
       } catch (e) { canvas.getContext('2d').drawImage(src, 0, 0); } // pixels unreadable: show the plain map
       done(null, canvas);
     });
-    return canvas;
   }
 });
-const tiles = new SunTiles({tileSize: 256, maxZoom: MAX_ZOOM, attribution: '© OpenStreetMap, weather © Open-Meteo'}).addTo(map);
-const repaintAll = () => Object.values(tiles._tiles).forEach(t => t.el && t.el._st && paintTile(t.el));
+const tiles = new SunTiles({tileSize: 256, maxZoom: MAX_ZOOM, updateWhenZooming: false, attribution: '© OpenStreetMap, weather © Open-Meteo'}).addTo(map);
+// repaint tiles; onScreen limits it to tiles in view (used for the frames of the day-switch animation)
+function repaintAll(onScreen) {
+  const pb = map.getPixelBounds(), z = map.getZoom();
+  for (const t of Object.values(tiles._tiles)) {
+    if (!t.el || !t.el._st) continue;
+    if (onScreen && (t.coords.z !== z || (t.coords.x + 1) * 256 < pb.min.x || t.coords.x * 256 > pb.max.x ||
+        (t.coords.y + 1) * 256 < pb.min.y || t.coords.y * 256 > pb.max.y)) continue;
+    paintTile(t.el);
+  }
+}
 
-// switch day, blending from the old one so squares flip across the map
-let tween = 0;
+// switch day: each on-screen tile is repainted once for the new day while a snapshot of the old picture fades
+// out on top of it, so the motion is a smooth GPU crossfade instead of many full repaints
 function applySel(animate, done) {
-  cancelAnimationFrame(tween);
   const from = selTo;
-  if (!animate || from === sel || matchMedia('(prefers-reduced-motion: reduce)').matches) { selFrom = selTo = sel; mix = 1; repaintAll(); done(); return; }
-  selFrom = from; selTo = sel; mix = 0;
-  const t0 = performance.now(), D = 750;
-  const frame = now => {
-    const t = Math.min(1, (now - t0) / D);
-    mix = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-    repaintAll();
-    if (t < 1) tween = requestAnimationFrame(frame); else { selFrom = selTo = sel; mix = 1; done(); }
-  };
-  tween = requestAnimationFrame(frame);
+  selFrom = selTo = sel; mix = 1;
+  if (!animate || from === sel || matchMedia('(prefers-reduced-motion: reduce)').matches) { repaintAll(); done(); return; }
+  const pb = map.getPixelBounds(), z = map.getZoom(), ghosts = [];
+  for (const t of Object.values(tiles._tiles)) {
+    const el = t.el;
+    if (!el || !el._st || !el.parentNode || t.coords.z !== z || (t.coords.x + 1) * 256 < pb.min.x || t.coords.x * 256 > pb.max.x ||
+        (t.coords.y + 1) * 256 < pb.min.y || t.coords.y * 256 > pb.max.y) continue;
+    const g = document.createElement('canvas');
+    g.width = g.height = N; g.getContext('2d').drawImage(el, 0, 0);
+    g.style.cssText = el.style.cssText; g.className = el.className; g.style.transition = 'opacity .7s ease';
+    el.parentNode.insertBefore(g, el.nextSibling);
+    ghosts.push(g);
+  }
+  repaintAll();
+  requestAnimationFrame(() => requestAnimationFrame(() => ghosts.forEach(g => { g.style.opacity = '0'; })));
+  setTimeout(() => ghosts.forEach(g => g.remove()), 800);
+  done();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -647,6 +763,7 @@ function render(animate) {
 }
 
 function ingest(res, s, pts) {
+  wxVersion++;
   (Array.isArray(res) ? res : [res]).forEach((r, k) => {
     const t = r.hourly.time, c = r.hourly.cloud_cover, byDay = {};
     t.forEach((ts, i) => {
@@ -665,7 +782,7 @@ function saveCache() {
 }
 try {
   const c = JSON.parse(localStorage.getItem('sunWx') || 'null');
-  if (c) { dayList = c.days || []; c.rows.forEach(([k, v]) => wx.set(k, v)); }
+  if (c) { dayList = c.days || []; c.rows.forEach(([k, v]) => wx.set(k, v)); wxVersion++; }
 } catch (e) {}
 
 async function load() {
@@ -677,14 +794,21 @@ async function load() {
   if (need.length) {
     if (!viewPoints().length) say(1, 'Checking the sky…', 'Fetching sun and cloud for this view.', true);
     try {
-      for (let k = 0; k < need.length; k += 80) {
-        const chunk = need.slice(k, k + 80);
-        const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover&forecast_days=7&timezone=auto' +
-          '&latitude=' + chunk.map(p => (p[1] * s).toFixed(4)).join(',') + '&longitude=' + chunk.map(p => (p[0] * s).toFixed(4)).join(',');
-        const res = await (await fetch(url)).json();
-        if (res.error) throw new Error(res.reason);
-        ingest(res, s, chunk);
-      }
+      // up to three requests of 80 points in flight at once
+      const chunks = [];
+      for (let k = 0; k < need.length; k += 80) chunks.push(need.slice(k, k + 80));
+      let next = 0;
+      const worker = async () => {
+        while (next < chunks.length) {
+          const chunk = chunks[next++];
+          const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover&forecast_days=7&timezone=auto' +
+            '&latitude=' + chunk.map(p => (p[1] * s).toFixed(4)).join(',') + '&longitude=' + chunk.map(p => (p[0] * s).toFixed(4)).join(',');
+          const res = await (await fetch(url)).json();
+          if (res.error) throw new Error(res.reason);
+          ingest(res, s, chunk);
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
       saveCache();
       staleNote = '';
     } catch (e) {
