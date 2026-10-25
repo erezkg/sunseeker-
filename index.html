@@ -12,6 +12,7 @@
     background:#fff;border-radius:10px;padding:10px 14px;box-shadow:0 2px 10px #0004;font-size:14px}
   #panel b{font-size:16px}
   select,button{font:inherit;margin-top:6px}
+  .cell span{position:absolute;transform:translate(-50%,-50%);line-height:1;pointer-events:none}
   #days{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
   #days button{margin:0;padding:4px 8px;border:1px solid #ccc;border-radius:14px;background:#fff;cursor:pointer}
   #days button.on{background:#f5b301;border-color:#f5b301;font-weight:600}
@@ -22,24 +23,18 @@
 <div id="panel">
   <b>☀️ Sunseeker</b>
   <div id="status">Finding your location…</div>
-  <label>Search radius
-    <select id="radius">
-      <option value="25">25 km</option><option value="50">50 km</option>
-      <option value="100" selected>100 km</option><option value="200">200 km</option>
-    </select>
-  </label>
   <button id="refresh">Refresh</button>
   <div id="days"></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-const N = 7; // grid is N x N points
+const COLS = 7; // grid columns across the visible map; rows follow the screen's aspect ratio
 const map = L.map('map').setView([0, 0], 2);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   {attribution: '© OpenStreetMap, weather © Open-Meteo', maxZoom: 18}).addTo(map);
 const layer = L.layerGroup().addTo(map);
 const statusEl = document.getElementById('status');
-let me = null;
+let me = null, cellPx = 40, loadId = 0, timer = null;
 
 function km(a, b) {
   const r = Math.PI / 180, dLat = (b[0]-a[0])*r, dLon = (b[1]-a[1])*r;
@@ -47,10 +42,11 @@ function km(a, b) {
   return 12742 * Math.asin(Math.sqrt(h));
 }
 
-// cloud cover % -> colour (green = clear, grey = overcast)
+// cloud cover % -> icon and background tint (yellow = sun, blue-grey = overcast)
+function icon(c) { return c <= 25 ? '☀️' : c <= 60 ? '⛅' : '☁️'; }
 function colour(c) {
-  const g = Math.round(200 - c * 1.2);
-  return `rgb(${Math.round(255 - c*1.1)},${Math.round(190 - c*0.5)},${g > 40 ? Math.round(c*0.9) : 90})`;
+  const t = c / 100, mix = (a, b) => Math.round(a + (b - a) * t);
+  return `rgb(${mix(255, 120)},${mix(210, 135)},${mix(60, 160)})`;
 }
 
 let pts = [], series = [], sel = 0; // sel: 0 = now, 1..7 = day index+1
@@ -76,12 +72,13 @@ function value(p) {
 
 function render() {
   layer.clearLayers();
-  const radius = +document.getElementById('radius').value;
   let best = null;
   const data = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
   data.forEach(d => {
-    L.circleMarker(d.pos, {radius: 14, stroke: false, fillOpacity: .7, fillColor: colour(d.cloud)})
+    L.circleMarker(d.pos, {radius: cellPx / 2, stroke: false, fillOpacity: .45, fillColor: colour(d.cloud)})
       .bindTooltip(d.cloud + '% cloud').addTo(layer);
+    L.marker(d.pos, {interactive: false, icon: L.divIcon({className: 'cell', iconSize: [0, 0],
+      html: `<span style="font-size:${Math.round(cellPx * .6)}px;opacity:${d.cloud <= 25 ? 1 : .5 + d.cloud / 200}">${icon(d.cloud)}</span>`})}).addTo(layer);
     d.dist = km(me, d.pos);
     if (d.cloud <= 25 && (!best || d.dist < best.dist)) best = d;
   });
@@ -93,24 +90,33 @@ function render() {
   else if (best) {
     statusEl.textContent = `${here.cloud}% cloud here ${when}. Nearest sun: ${best.dist.toFixed(0)} km away (${best.cloud}% cloud)${night}.`;
     L.polyline([me, best.pos], {color: '#e69500', dashArray: '6'}).addTo(layer);
-  } else statusEl.textContent = `${here.cloud}% cloud here ${when}, and no sunny spot within ${radius} km. Try a bigger radius.`;
+  } else statusEl.textContent = `${here.cloud}% cloud here ${when}, and no sunny spot in this view. Zoom out or pan to look further.`;
+}
+
+// grid of points covering the visible map area
+function gridForView() {
+  const size = map.getSize(), b = map.getBounds();
+  const cols = COLS, rows = Math.max(3, Math.min(11, Math.round(cols * size.y / size.x)));
+  cellPx = Math.min(size.x / cols, size.y / rows);
+  const out = [];
+  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++)
+    out.push(map.containerPointToLatLng([size.x * (j + .5) / cols, size.y * (i + .5) / rows]));
+  return out.map(p => [p.lat, p.lng]);
 }
 
 async function load() {
-  const radius = +document.getElementById('radius').value;
+  const id = ++loadId;
   statusEl.textContent = 'Fetching cloud cover…';
-  const [lat, lon] = me;
-  const dLat = radius / 111, dLon = radius / (111 * Math.cos(lat * Math.PI / 180));
-  pts = [];
-  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++)
-    pts.push([lat + dLat * (2*i/(N-1) - 1), lon + dLon * (2*j/(N-1) - 1)]);
+  const grid = gridForView();
   const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover' +
     '&forecast_days=7&timezone=auto' +
-    '&latitude=' + pts.map(p => p[0].toFixed(3)).join(',') +
-    '&longitude=' + pts.map(p => p[1].toFixed(3)).join(',');
+    '&latitude=' + grid.map(p => p[0].toFixed(3)).join(',') +
+    '&longitude=' + grid.map(p => p[1].toFixed(3)).join(',');
   try {
     const res = await (await fetch(url)).json();
     if (res.error) throw new Error(res.reason);
+    if (id !== loadId) return; // the view moved again; a newer load is in flight
+    pts = grid;
     series = (Array.isArray(res) ? res : [res]).map(r => {
       const t = r.hourly.time, c = r.hourly.cloud_cover, byDay = {};
       t.forEach((ts, i) => {
@@ -123,19 +129,20 @@ async function load() {
     });
     buildChips();
     render();
-    map.fitBounds(L.latLngBounds(pts).pad(.1));
-  } catch (e) { statusEl.textContent = 'Could not load weather: ' + e.message; }
+  } catch (e) { if (id === loadId) statusEl.textContent = 'Could not load weather: ' + e.message; }
 }
+
+// reload the grid once the user stops panning or zooming
+map.on('moveend', () => { if (me) { clearTimeout(timer); timer = setTimeout(load, 700); } });
 
 function locate() {
   if (!navigator.geolocation) { statusEl.textContent = 'Geolocation not supported.'; return; }
   navigator.geolocation.getCurrentPosition(
-    p => { me = [p.coords.latitude, p.coords.longitude]; load(); },
+    p => { me = [p.coords.latitude, p.coords.longitude]; map.setView(me, 8); },
     e => { statusEl.textContent = 'Location denied: ' + e.message; },
     {enableHighAccuracy: false, timeout: 15000});
 }
 document.getElementById('refresh').onclick = () => me ? load() : locate();
-document.getElementById('radius').onchange = () => me && load();
 locate();
 </script>
 </body>
