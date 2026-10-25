@@ -273,6 +273,17 @@ function buildChips() {
 // current cloud cover, or the mean over daylight hours (9-17h local) of the chosen day
 const value = p => sel === 0 ? p.now : p.daily[sel - 1];
 
+// a dotted straight line that becomes the real road route (white casing + black line) once routing returns
+function routeLine(group, a, b) {
+  const straight = L.polyline([a, b], {color: '#111', weight: 2, dashArray: '2 7', lineCap: 'round', interactive: false}).addTo(group);
+  return info => {
+    if (!info.line || !group.hasLayer(straight)) return;
+    group.removeLayer(straight);
+    L.polyline(info.line, {color: '#fff', weight: 7, opacity: .95, lineJoin: 'round', interactive: false}).addTo(group);
+    L.polyline(info.line, {color: '#111', weight: 3.5, lineJoin: 'round', interactive: false}).addTo(group);
+  };
+}
+
 // driving distance and time via the public OSRM demo server; falls back to a straight-line estimate
 const driveCache = {};
 async function drive(a, b) {
@@ -280,8 +291,9 @@ async function drive(a, b) {
   if (driveCache[key]) return driveCache[key];
   let info = {km: km(a, b) * 1.3, min: km(a, b) * 1.3 / 65 * 60, est: true};
   try {
-    const r = await (await fetch(`https://router.project-osrm.org/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=false`)).json();
-    if (r.routes && r.routes[0]) info = {km: r.routes[0].distance / 1000, min: r.routes[0].duration / 60, est: false};
+    const r = await (await fetch(`https://router.project-osrm.org/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`)).json();
+    if (r.routes && r.routes[0]) info = {km: r.routes[0].distance / 1000, min: r.routes[0].duration / 60, est: false,
+      line: r.routes[0].geometry.coordinates.map(c => [c[1], c[0]])};
   } catch (e) { /* keep the estimate */ }
   return driveCache[key] = info;
 }
@@ -306,12 +318,13 @@ function render(animate) {
   const night = sel === 0 && !here.day ? ' It is night there now.' : '';
   let info = null;
   if (best && here.cloud > SUNNY) {
-    L.polyline([me, best.pos], {color: '#111', weight: 2, dashArray: '2 7', lineCap: 'round'}).addTo(layer);
+    const showRoute = routeLine(layer, me, best.pos);
     const target = L.circleMarker(best.pos, {radius: 11, color: '#111', weight: 3, fillColor: '#fff', fillOpacity: 1}).addTo(layer);
     info = estimate(best.dist);
     target.bindTooltip(fmtDrive(info), {permanent: true, direction: 'top', offset: [0, -10]});
     drive(me, best.pos).then(i => {
       if (rid !== renderId) return; // the view changed while routing
+      showRoute(i);
       target.setTooltipContent(fmtDrive(i));
       const p = statusEl.querySelector('p'); if (p) p.textContent = sunLine(best, i, night);
     });
@@ -374,11 +387,11 @@ function showPick() {
   if (!pick || !fieldVals || !me) return;
   const at = pick, cloud = cloudAt(at), d = km(me, [at.lat, at.lng]);
   refreshing = true; pickGroup.clearLayers();
-  L.polyline([me, at], {color: '#111', weight: 2, dashArray: '2 7', lineCap: 'round', interactive: false}).addTo(pickGroup);
+  const showRoute = routeLine(pickGroup, me, at);
   const m = L.circleMarker(at, {radius: 9, color: '#111', weight: 3, fillColor: '#fff', fillOpacity: 1}).addTo(pickGroup);
   m.bindPopup(pickHtml(cloud, estimate(d)), {closeButton: false, offset: [0, -4]}).openPopup();
   refreshing = false;
-  drive(me, [at.lat, at.lng]).then(info => { if (pick === at) m.setPopupContent(pickHtml(cloud, info)); });
+  drive(me, [at.lat, at.lng]).then(info => { if (pick === at) { showRoute(info); m.setPopupContent(pickHtml(cloud, info)); } });
 }
 map.on('click', e => { pick = e.latlng; showPick(); });
 map.on('popupclose', () => { if (!refreshing) { pick = null; pickGroup.clearLayers(); } });
