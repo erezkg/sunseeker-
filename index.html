@@ -72,7 +72,9 @@
 <div id="days" class="glass"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-const MAX_POINTS = 120;  // weather points sampled across the visible map
+const SPACING_PX = 72;   // weather points sit on a fixed lat/lng lattice, about this far apart on screen
+const STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20]; // lattice spacings in degrees
+const KEEP_MS = 90 * 60e3; // reuse fetched weather this long, so panning and reloading cost no API calls
 const SUNNY = 25;        // % cloud cover at or below which a spot counts as sunny
 
 const svg = body => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
@@ -89,8 +91,7 @@ const map = L.map('map', {zoomControl: false, maxZoom: 18}).setView([0, 0], 2);
 const layer = L.layerGroup().addTo(map);   // pin, nearest-sun marker
 const cityLayer = L.layerGroup().addTo(map); // city name labels
 const statusEl = document.getElementById('status');
-let me = null, pts = [], series = [], sel = 0, grid = {cols: 3, rows: 3}, loadId = 0, timer = null;
-let fieldVals = null;                      // cloud cover % at each grid point for the chosen day
+let me = null, sel = 0, loadId = 0, timer = null, staleNote = '';
 
 document.getElementById('legend').innerHTML =
   `<span><i class="b0"></i><i class="b1"></i>Sunny</span><span><i class="b2"></i>Mixed</span><span><i class="b4"></i>Cloudy</span>`;
@@ -116,20 +117,58 @@ function hash3(a, b, c) {
   return (h >>> 0) / 4294967296;
 }
 
-// cloud cover at a pixel of the grid's screen, bilinear between the grid points
-function sample(vals, px, py) {
-  const {cols, rows, size} = grid;
-  const fx = Math.max(0, Math.min(cols - 1, px / (size.x / cols) - .5)), fy = Math.max(0, Math.min(rows - 1, py / (size.y / rows) - .5));
-  const j = Math.min(Math.floor(fx), cols - 2), i = Math.min(Math.floor(fy), rows - 2), tx = fx - j, ty = fy - i;
-  const v = (r, c) => vals[r * cols + c];
-  return (v(i, j) * (1 - tx) + v(i, j + 1) * tx) * (1 - ty) + (v(i + 1, j) * (1 - tx) + v(i + 1, j + 1) * tx) * ty;
+// ---- weather store: points on a fixed lat/lng lattice, cached so panning only fetches what is new ----
+const wx = new Map();                 // "step:i:j" -> {now, day, daily[], t}; point (i, j) sits at lng i*step, lat j*step
+let stepDeg = 0.1, dayList = [], selFrom = 0, selTo = 0, mix = 1;   // selFrom -> selTo is the day-switch blend
+const wkey = (s, i, j) => `${s}:${i}:${j}`;
+const pval = (p, k) => k === 0 ? p.now : p.daily[k - 1];
+const fresh = k => { const p = wx.get(k); return !!p && Date.now() - p.t < KEEP_MS; };
+
+function pickStep() {
+  const need = SPACING_PX * 360 / (256 * 2 ** map.getZoom());
+  return STEPS.find(s => s >= need) || STEPS[STEPS.length - 1];
+}
+
+function wxVal(s, i, j) {
+  const p = wx.get(wkey(s, i, j)); if (!p) return null;
+  const a = pval(p, selFrom), b = pval(p, selTo);
+  return a + (b - a) * mix;
+}
+
+// bilinear cloud cover between the surrounding lattice points at one spacing (ignoring ones not fetched)
+function bilinear(s, lat, lng) {
+  const fi = lng / s, fj = lat / s, i0 = Math.floor(fi), j0 = Math.floor(fj), tx = fi - i0, ty = fj - j0;
+  let sum = 0, wsum = 0;
+  for (const [di, dj, w] of [[0, 0, (1 - tx) * (1 - ty)], [1, 0, tx * (1 - ty)], [0, 1, (1 - tx) * ty], [1, 1, tx * ty]]) {
+    const v = wxVal(s, i0 + di, j0 + dj);
+    if (v != null && w > 0) { sum += v * w; wsum += w; }
+  }
+  return wsum > 0 ? sum / wsum : null;
+}
+
+// cloud cover anywhere; falls back to another lattice spacing while a fresh one is loading
+function cloudLL(lat, lng) {
+  const order = [stepDeg, ...STEPS.filter(s => s !== stepDeg).sort((a, b) => Math.abs(Math.log(a / stepDeg)) - Math.abs(Math.log(b / stepDeg)))];
+  for (const s of order) { const v = bilinear(s, lat, lng); if (v != null) return v; }
+  return null;
 }
 
 // cloud % at a point given in pixels of zoom z (global pixel coordinates)
 function cloudAtGlobal(gx, gy, z) {
-  if (!fieldVals) return null;
-  const k = 2 ** (grid.zoom - z);
-  return sample(fieldVals, gx * k - grid.pixelBounds.min.x, gy * k - grid.pixelBounds.min.y);
+  if (!wx.size) return null;
+  const ll = map.unproject(L.point(gx, gy), z);
+  return cloudLL(ll.lat, ll.lng);
+}
+
+// the lattice points inside the current view, with the chosen day's value
+function viewPoints() {
+  const b = map.getBounds(), s = stepDeg, out = [];
+  for (let i = Math.ceil(b.getWest() / s); i <= Math.floor(b.getEast() / s); i++)
+    for (let j = Math.ceil(b.getSouth() / s); j <= Math.floor(b.getNorth() / s); j++) {
+      const p = wx.get(wkey(s, i, j));
+      if (p) out.push({pos: [j * s, i * s], cloud: pval(p, sel), day: p.day});
+    }
+  return out;
 }
 
 // fill colour of one feature: blue gets likelier with cloud, red/yellow with sun, the rest stays paper-white
@@ -240,20 +279,21 @@ const SunTiles = L.GridLayer.extend({
 const tiles = new SunTiles({tileSize: 256, maxZoom: 18, attribution: '© OpenStreetMap, weather © Open-Meteo'}).addTo(map);
 const repaintAll = () => Object.values(tiles._tiles).forEach(t => t.el && t.el._st && paintTile(t.el));
 
-// swap the field's values, blending from the old ones so squares flip across the map
+// switch day, blending from the old one so squares flip across the map
 let tween = 0;
-function setField(vals, animate, done) {
+function applySel(animate, done) {
   cancelAnimationFrame(tween);
-  const from = fieldVals;
-  if (!animate || !from || from.length !== vals.length || matchMedia('(prefers-reduced-motion: reduce)').matches) { fieldVals = vals; repaintAll(); done(); return; }
+  const from = selTo;
+  if (!animate || from === sel || matchMedia('(prefers-reduced-motion: reduce)').matches) { selFrom = selTo = sel; mix = 1; repaintAll(); done(); return; }
+  selFrom = from; selTo = sel; mix = 0;
   const t0 = performance.now(), D = 750;
-  const step = now => {
-    const t = Math.min(1, (now - t0) / D), e = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-    fieldVals = vals.map((v, i) => from[i] + (v - from[i]) * e);
+  const frame = now => {
+    const t = Math.min(1, (now - t0) / D);
+    mix = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
     repaintAll();
-    if (t < 1) tween = requestAnimationFrame(step); else done();
+    if (t < 1) tween = requestAnimationFrame(frame); else { selFrom = selTo = sel; mix = 1; done(); }
   };
-  tween = requestAnimationFrame(step);
+  tween = requestAnimationFrame(frame);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -263,7 +303,7 @@ function say(lv, title, text, busy) {
 }
 
 function buildChips() {
-  const days = series[0].days;
+  const days = dayList;
   const el = document.getElementById('days');
   el.innerHTML = '';
   ['Now', ...days.map((d, i) => i === 0 ? 'Today' : i === 1 ? 'Tomorrow' :
@@ -275,8 +315,7 @@ function buildChips() {
   });
 }
 
-// current cloud cover, or the mean over daylight hours (9-17h local) of the chosen day
-const value = p => sel === 0 ? p.now : p.daily[sel - 1];
+// pval(): current cloud cover (k = 0), or the mean over daylight hours (9-17h local) of day k
 
 // a dotted straight line that becomes the real road route (white casing + black line) once routing returns
 function routeLine(group, a, b) {
@@ -298,14 +337,14 @@ async function drive(a, b) {
   try {
     const r = await (await fetch(`https://router.project-osrm.org/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`)).json();
     if (r.routes && r.routes[0]) info = {km: r.routes[0].distance / 1000, min: r.routes[0].duration / 60, est: false,
-      line: r.routes[0].geometry.coordinates.map(c => [c[1], c[0]])};
+      line: r.routes[0].geometry ? r.routes[0].geometry.coordinates.map(c => [c[1], c[0]]) : null};
   } catch (e) { /* keep the estimate */ }
   return driveCache[key] = info;
 }
 const fmtTime = m => m < 60 ? `${Math.max(1, Math.round(m))} min` : `${Math.floor(m / 60)} h ${Math.round(m % 60)} min`;
 const fmtDrive = i => `${i.est ? '~' : ''}${Math.round(i.km)} km · ${i.est ? '~' : ''}${fmtTime(i.min)} drive`;
 const estimate = d => ({km: d * 1.3, min: d * 1.3 / 65 * 60, est: true});
-const sunLine = (best, info, night) => `Nearest sun: ${fmtDrive(info)} (${best.cloud}% cloud there).${night}`;
+const sunLine = (best, info, night) => `Nearest sun: ${fmtDrive(info)} (${best.cloud}% cloud there).${night}${staleNote}`;
 
 // ---- city names, from OpenStreetMap via Overpass: biggest first, each with its cloud cover, no overlaps ----
 let cities = [], cityKey = '';
@@ -329,8 +368,9 @@ async function loadCities() {
 
 function drawCities() {
   cityLayer.clearLayers();
-  if (!fieldVals) return;
+  if (!wx.size) return;
   const size = map.getSize(), taken = [[0, 0, size.x, 96], [0, size.y - 70, size.x, size.y]]; // keep clear of the status card and day bar
+  if (me) { const m = map.latLngToContainerPoint(me); taken.push([m.x - 14, m.y - 14, m.x + 14, m.y + 14]); } // and of your own dot
   let n = 0;
   for (const c of cities) {
     if (n >= 14) break;
@@ -339,7 +379,9 @@ function drawCities() {
     if (box[0] < 4 || box[2] > size.x - 4 || box[1] < 4 || box[3] > size.y - 4) continue;
     if (taken.some(t => box[0] < t[2] && box[2] > t[0] && box[1] < t[3] && box[3] > t[1])) continue;
     taken.push(box); n++;
-    const cloud = cloudAt(c.ll), el = document.createElement('div');
+    const cloud = cloudAt(c.ll);
+    if (cloud == null) continue;
+    const el = document.createElement('div');
     el.className = 'city';
     const sw = document.createElement('i'); sw.className = 'b' + level(cloud);
     const nm = document.createElement('span'); nm.textContent = c.name;
@@ -354,14 +396,15 @@ let renderId = 0;
 function render(animate) {
   const rid = ++renderId;
   layer.clearLayers();
-  const data = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
+  const data = viewPoints();
+  if (!data.length) { say(4, 'No weather here yet', 'Pan or zoom a little, or tap the locate button.'); return; }
   const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
   let best = null;
   data.forEach(d => {
     d.lv = level(d.cloud); d.dist = km(me, d.pos);
     if (d.cloud <= SUNNY && (!best || d.dist < best.dist)) best = d;
   });
-  setField(data.map(d => d.cloud), animate, () => { drawCities(); showPick(); }); // labels and the tapped spot read the final values
+  applySel(animate, () => { drawCities(); showPick(); }); // labels and the tapped spot read the final values
   const when = ['now', 'today', 'tomorrow'][sel] || 'that day';
   const night = sel === 0 && !here.day ? ' It is night there now.' : '';
   let info = null;
@@ -378,62 +421,74 @@ function render(animate) {
     });
   }
   L.marker(me, {icon: L.divIcon({className: '', iconSize: [20, 20], iconAnchor: [10, 10], html: '<div class="pin"></div>'}), interactive: false}).addTo(layer);
-  if (here.cloud <= SUNNY) say(here.lv, `Sunny ${when}`, `${here.cloud}% cloud at your location.${night}`);
+  if (here.cloud <= SUNNY) say(here.lv, `Sunny ${when}`, `${here.cloud}% cloud at your location.${night}${staleNote}`);
   else if (best) say(here.lv, `${here.cloud}% cloud ${when}`, sunLine(best, info, night));
-  else say(here.lv, `Cloudy ${when}`, `${here.cloud}% cloud here and no sun in this view. Zoom out or pan to look further.`);
+  else say(here.lv, `Cloudy ${when}`, `${here.cloud}% cloud here and no sun in this view. Zoom out or pan to look further.${staleNote}`);
 }
 
-// grid of weather points covering the visible map area
-function gridForView() {
-  const size = map.getSize();
-  const cell = Math.max(52, Math.sqrt(size.x * size.y / MAX_POINTS)); // never closer than 52px apart
-  const cols = Math.max(3, Math.round(size.x / cell)), rows = Math.max(3, Math.round(size.y / cell));
-  const out = [];
-  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
-    const p = map.containerPointToLatLng([size.x * (j + .5) / cols, size.y * (i + .5) / rows]);
-    out.push([p.lat, p.lng]);
-  }
-  return {cols, rows, pts: out, size, zoom: map.getZoom(), pixelBounds: map.getPixelBounds()};
+function ingest(res, s, pts) {
+  (Array.isArray(res) ? res : [res]).forEach((r, k) => {
+    const t = r.hourly.time, c = r.hourly.cloud_cover, byDay = {};
+    t.forEach((ts, i) => {
+      const h = +ts.slice(11, 13);
+      if (h >= 9 && h <= 17) (byDay[ts.slice(0, 10)] ||= []).push(c[i]);
+    });
+    const ds = Object.keys(byDay);
+    if (!dayList.length || ds[0] > dayList[0]) dayList = ds;     // the newest list of forecast dates
+    wx.set(wkey(s, pts[k][0], pts[k][1]), {now: r.current.cloud_cover, day: r.current.is_day, t: Date.now(),
+      daily: ds.map(d => Math.round(byDay[d].reduce((a, b) => a + b) / byDay[d].length))});
+  });
 }
+
+function saveCache() {
+  try { localStorage.setItem('sunWx', JSON.stringify({days: dayList, rows: [...wx].filter(([k]) => fresh(k)).slice(-1500)})); } catch (e) {}
+}
+try {
+  const c = JSON.parse(localStorage.getItem('sunWx') || 'null');
+  if (c) { dayList = c.days || []; c.rows.forEach(([k, v]) => wx.set(k, v)); }
+} catch (e) {}
 
 async function load() {
-  const id = ++loadId;
-  say(1, 'Checking the sky…', 'Fetching cloud cover for this view.', true);
-  const g = gridForView();
-  const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover' +
-    '&forecast_days=7&timezone=auto' +
-    '&latitude=' + g.pts.map(p => p[0].toFixed(3)).join(',') +
-    '&longitude=' + g.pts.map(p => p[1].toFixed(3)).join(',');
-  try {
-    const res = await (await fetch(url)).json();
-    if (res.error) throw new Error(res.reason);
-    if (id !== loadId) return; // the view moved again; a newer load is in flight
-    pts = g.pts; grid = g;
-    series = (Array.isArray(res) ? res : [res]).map(r => {
-      const t = r.hourly.time, c = r.hourly.cloud_cover, byDay = {};
-      t.forEach((ts, i) => {
-        const h = +ts.slice(11, 13);
-        if (h >= 9 && h <= 17) (byDay[ts.slice(0, 10)] ||= []).push(c[i]);
-      });
-      const days = Object.keys(byDay);
-      return {now: r.current.cloud_cover, day: r.current.is_day, days,
-        daily: days.map(d => Math.round(byDay[d].reduce((a, b) => a + b) / byDay[d].length))};
-    });
-    buildChips();
-    render(false);
-    loadCities();
-  } catch (e) { if (id === loadId) say(4, 'Could not load weather', e.message); }
+  const id = ++loadId, s = stepDeg = pickStep(), b = map.getBounds();
+  const need = [];
+  for (let i = Math.floor(b.getWest() / s) - 1; i <= Math.ceil(b.getEast() / s) + 1; i++)
+    for (let j = Math.max(-80 / s, Math.floor(b.getSouth() / s) - 1); j <= Math.min(80 / s, Math.ceil(b.getNorth() / s) + 1); j++)
+      if (!fresh(wkey(s, i, j))) need.push([i, j]);
+  if (need.length) {
+    if (!viewPoints().length) say(1, 'Checking the sky…', 'Fetching cloud cover for this view.', true);
+    try {
+      for (let k = 0; k < need.length; k += 80) {
+        const chunk = need.slice(k, k + 80);
+        const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover&forecast_days=7&timezone=auto' +
+          '&latitude=' + chunk.map(p => (p[1] * s).toFixed(4)).join(',') + '&longitude=' + chunk.map(p => (p[0] * s).toFixed(4)).join(',');
+        const res = await (await fetch(url)).json();
+        if (res.error) throw new Error(res.reason);
+        ingest(res, s, chunk);
+      }
+      saveCache();
+      staleNote = '';
+    } catch (e) {
+      if (!viewPoints().length && !wx.size) { if (id === loadId) say(4, 'Could not load weather', e.message); return; }
+      staleNote = ' The weather service is busy, so figures may be a little old.';
+    }
+  }
+  if (id !== loadId) return;           // the view moved again; a newer load is in flight
+  if (!viewPoints().length) { say(4, 'Could not load weather', 'No data for this view yet. Try again in a few minutes.'); return; }
+  buildChips();
+  render(false);
+  loadCities();
 }
 
 // tap anywhere: mark the spot with its cloud cover, plus distance and drive time from you
 let pick = null, refreshing = false;
 const pickGroup = L.layerGroup().addTo(map);
-const cloudAt = ll => { const p = map.project(ll, grid.zoom); return Math.round(sample(fieldVals, p.x - grid.pixelBounds.min.x, p.y - grid.pixelBounds.min.y)); };
+const cloudAt = ll => { const v = cloudLL(ll.lat, ll.lng); return v == null ? null : Math.round(v); };
 const pickHtml = (cloud, info) => `<b>${cloud}% cloud</b><br>${fmtDrive(info)}`;
 
 function showPick() {
-  if (!pick || !fieldVals || !me) return;
+  if (!pick || !wx.size || !me) return;
   const at = pick, cloud = cloudAt(at), d = km(me, [at.lat, at.lng]);
+  if (cloud == null) return;
   refreshing = true; pickGroup.clearLayers();
   const showRoute = routeLine(pickGroup, me, at);
   const m = L.circleMarker(at, {radius: 9, color: '#111', weight: 3, fillColor: '#fff', fillOpacity: 1}).addTo(pickGroup);
