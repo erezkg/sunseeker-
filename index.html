@@ -11,6 +11,8 @@
     --bg:#f6f3ee; --card:rgba(255,255,255,.82); --ink:#1d1d1f; --muted:#6e6e73; --line:rgba(0,0,0,.08);
     --sun:#f59e0b; --sun-bg:rgba(251,191,36,.30); --part:#d4a24c; --part-bg:rgba(226,196,130,.26);
     --cloud:#64748b; --cloud-bg:rgba(100,116,139,.22); --shadow:0 8px 30px rgba(0,0,0,.12);
+    /* Mondrian-style blocks, sunniest to cloudiest */
+    --b0:#ff6a13; --b1:#fdd22f; --b2:#a8e4ef; --b3:#3b88d4; --b4:#0f4c97; --gap:#fff;
   }
   @media (prefers-color-scheme:dark){:root{
     --bg:#16181d; --card:rgba(30,32,38,.82); --ink:#f5f5f7; --muted:#a1a1a8; --line:rgba(255,255,255,.1);
@@ -26,7 +28,7 @@
 
   #status{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;max-width:420px;
     border-radius:20px;padding:14px 16px;display:flex;gap:14px;align-items:center}
-  #status .ico{flex:none;width:46px;height:46px;border-radius:14px;display:grid;place-items:center}
+  #status .ico{flex:none;width:46px;height:46px;border-radius:6px;display:grid;place-items:center;background:var(--c)}
   #status .ico svg{width:26px;height:26px}
   #status h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em}
   #status p{margin:2px 0 0;font-size:13.5px;color:var(--muted);line-height:1.35}
@@ -43,19 +45,18 @@
   #legend{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 78px);border-radius:14px;
     padding:8px 11px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
   #legend span{display:flex;align-items:center;gap:4px}
-  #legend svg{width:14px;height:14px}
+  #legend i{width:14px;height:14px;display:inline-block;background:var(--c);border:1px solid rgba(0,0,0,.15)}
 
-  /* map cells */
-  .cell{display:grid;place-items:center;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
-  .cell svg{width:52%;height:52%}
-  .cell.sun{background:radial-gradient(circle,var(--sun-bg),transparent 72%);color:var(--sun)}
-  .cell.part{background:radial-gradient(circle,var(--part-bg),transparent 72%);color:var(--part)}
-  .cell.cloud{background:radial-gradient(circle,var(--cloud-bg),transparent 72%);color:var(--cloud)}
-  /* mute the OSM tiles so the weather icons stand out */
-  .leaflet-tile-pane{filter:grayscale(.9) contrast(.85) brightness(1.08)}
-  @media (prefers-color-scheme:dark){.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(.8) brightness(.75) contrast(.9)}}
-  .pin{width:18px;height:18px;border-radius:50%;background:#2f7cf6;border:3px solid #fff;box-shadow:0 0 0 6px rgba(47,124,246,.25),0 2px 8px rgba(0,0,0,.3)}
-  .target{border-radius:50%;border:2px solid var(--sun);box-shadow:0 0 0 4px var(--sun-bg);transform:translate(-50%,-50%)}
+  /* map blocks */
+  .blk{display:grid;place-items:center;pointer-events:none}
+  .blk svg{width:100%;height:100%}
+  .ico.b0,.ico.b1,.ico.b2{color:#1d1d1f}.ico.b3,.ico.b4{color:#fff}
+  .blk.b0,.blk.b1,.blk.b2{color:rgba(29,29,31,.8)}.blk.b3,.blk.b4{color:rgba(255,255,255,.92)}
+  .b0{--c:var(--b0)}.b1{--c:var(--b1)}.b2{--c:var(--b2)}.b3{--c:var(--b3)}.b4{--c:var(--b4)}
+  /* wash out the OSM tiles so the blocks dominate */
+  .leaflet-tile-pane{filter:grayscale(1) contrast(.7) brightness(1.2)}
+  @media (prefers-color-scheme:dark){.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(1) brightness(.6) contrast(.9)}}
+  .pin{width:20px;height:20px;border-radius:50%;background:#111;border:4px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4)}
   .leaflet-control-attribution{background:var(--card)!important;color:var(--muted)!important;font-size:10px;border-radius:8px 0 0 0}
   .leaflet-control-attribution a{color:var(--muted)!important}
   .leaflet-tooltip{border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);box-shadow:var(--shadow);font:600 12px system-ui}
@@ -79,17 +80,18 @@ const ICONS = {
   part: svg('<path d="M12 2v2M4.93 4.93l1.41 1.41M20 12h2M19.07 4.93l-1.41 1.41M15.947 12.65a4 4 0 0 0-5.925-4.128M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"/>'),
   cloud: svg('<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>'),
 };
-const kind = c => c <= SUNNY ? 'sun' : c <= 60 ? 'part' : 'cloud';
+const level = c => c <= 10 ? 0 : c <= SUNNY ? 1 : c <= 45 ? 2 : c <= 70 ? 3 : 4;
+const iconFor = lv => lv <= 1 ? ICONS.sun : lv === 2 || lv === 3 ? ICONS.part : ICONS.cloud;
 
 const map = L.map('map', {zoomControl: false}).setView([0, 0], 2);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenStreetMap, weather © Open-Meteo', maxZoom: 18}).addTo(map);
 const layer = L.layerGroup().addTo(map);
 const statusEl = document.getElementById('status');
-let me = null, pts = [], series = [], sel = 0, cellPx = 40, loadId = 0, timer = null;
+let me = null, pts = [], series = [], sel = 0, grid = {cols: COLS, rows: 3}, loadId = 0, timer = null;
 
 document.getElementById('legend').innerHTML =
-  `<span style="color:var(--sun)">${ICONS.sun}</span>Sunny<span style="color:var(--part)">${ICONS.part}</span>Mixed<span style="color:var(--cloud)">${ICONS.cloud}</span>Cloudy`;
+  `<span><i class="b0"></i><i class="b1"></i>Sunny</span><span><i class="b2"></i><i class="b3"></i>Mixed</span><span><i class="b4"></i>Cloudy</span>`;
 
 function km(a, b) {
   const r = Math.PI / 180, dLat = (b[0]-a[0])*r, dLon = (b[1]-a[1])*r;
@@ -97,8 +99,8 @@ function km(a, b) {
   return 12742 * Math.asin(Math.sqrt(h));
 }
 
-function say(k, title, text, busy) {
-  statusEl.innerHTML = `<div class="ico cell ${k}" style="transform:none;background:var(--${k}-bg)">${ICONS[k]}</div>
+function say(lv, title, text, busy) {
+  statusEl.innerHTML = `<div class="ico b${lv}">${iconFor(lv)}</div>
     <div><h1 class="${busy ? 'spin' : ''}">${title}</h1><p>${text}</p></div>`;
 }
 
@@ -123,53 +125,69 @@ function render() {
   const data = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
   let best = null;
   data.forEach(d => {
-    d.dist = km(me, d.pos);
+    d.lv = level(d.cloud); d.dist = km(me, d.pos);
     if (d.cloud <= SUNNY && (!best || d.dist < best.dist)) best = d;
-    const s = Math.round(cellPx * 1.15);
-    L.marker(d.pos, {icon: L.divIcon({className: '', iconSize: [0, 0],
-      html: `<div class="cell ${kind(d.cloud)}" style="width:${s}px;height:${s}px">${ICONS[kind(d.cloud)]}</div>`})})
-      .bindTooltip(`${d.cloud}% cloud`).addTo(layer);
   });
   const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
+  drawBlocks(data, here.cloud > SUNNY ? best : null); // outline the nearest sun only when it is elsewhere
   const when = ['now', 'today', 'tomorrow'][sel] || 'that day';
   const night = sel === 0 && !here.day ? ' It is night there now.' : '';
-  if (best && here.cloud > SUNNY) {
-    L.polyline([me, best.pos], {color: '#f59e0b', weight: 2, dashArray: '2 7', lineCap: 'round'}).addTo(layer);
-    L.marker(best.pos, {icon: L.divIcon({className: '', iconSize: [0, 0],
-      html: `<div class="target" style="width:${cellPx}px;height:${cellPx}px"></div>`}), interactive: false}).addTo(layer);
+  L.marker(me, {icon: L.divIcon({className: '', iconSize: [20, 20], iconAnchor: [10, 10], html: '<div class="pin"></div>'}), interactive: false}).addTo(layer);
+  if (here.cloud <= SUNNY) say(here.lv, `Sunny ${when}`, `${here.cloud}% cloud at your location.${night}`);
+  else if (best) say(here.lv, `${here.cloud}% cloud ${when}`, `Nearest sun is ${best.dist.toFixed(0)} km away (${best.cloud}% cloud). Outlined in black.${night}`);
+  else say(here.lv, `Cloudy ${when}`, `${here.cloud}% cloud here and no sun in this view. Zoom out or pan to look further.`);
+}
+
+// merge neighbouring cells of the same level into rectangles (Mondrian look) and draw them
+function drawBlocks(data, best) {
+  const size = map.getSize(), cw = size.x / grid.cols, ch = size.y / grid.rows;
+  const seen = new Set(), at = (r, c) => r * grid.cols + c;
+  for (let r = 0; r < grid.rows; r++) for (let c = 0; c < grid.cols; c++) {
+    if (seen.has(at(r, c))) continue;
+    const lv = data[at(r, c)].lv;
+    const ok = (rr, cc) => cc < grid.cols && rr < grid.rows && !seen.has(at(rr, cc)) && data[at(rr, cc)].lv === lv;
+    let w = 1; while (ok(r, c + w)) w++;
+    let h = 1; while ([...Array(w).keys()].every(i => ok(r + h, c + i))) h++;
+    const members = [];
+    for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) { seen.add(at(r + i, c + j)); members.push(data[at(r + i, c + j)]); }
+    const avg = Math.round(members.reduce((a, m) => a + m.cloud, 0) / members.length);
+    const nw = map.containerPointToLatLng([c * cw, r * ch]), se = map.containerPointToLatLng([(c + w) * cw, (r + h) * ch]);
+    const isBest = !!best && members.includes(best);
+    L.rectangle([nw, se], {color: isBest ? '#111' : '#fff', weight: isBest ? 4 : 3, opacity: 1,
+      fillColor: ['#ff6a13', '#fdd22f', '#a8e4ef', '#3b88d4', '#0f4c97'][lv], fillOpacity: .78})
+      .bindTooltip(`${avg}% cloud`).addTo(layer);
+    const is = Math.max(14, Math.min(34, Math.min(w * cw, h * ch) * .32));
+    L.marker(map.containerPointToLatLng([(c + w / 2) * cw, (r + h / 2) * ch]), {interactive: false, icon: L.divIcon({
+      className: '', iconSize: [0, 0],
+      html: `<div class="blk b${lv}" style="position:absolute;width:${is}px;height:${is}px;transform:translate(-50%,-50%)">${iconFor(lv)}</div>`})}).addTo(layer);
   }
-  L.marker(me, {icon: L.divIcon({className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="pin"></div>'}), interactive: false}).addTo(layer);
-  if (here.cloud <= SUNNY) say('sun', `Sunny ${when}`, `${here.cloud}% cloud at your location.${night}`);
-  else if (best) say(kind(here.cloud), `${here.cloud}% cloud ${when}`, `Nearest sun is ${best.dist.toFixed(0)} km away (${best.cloud}% cloud).${night}`);
-  else say(kind(here.cloud), `Cloudy ${when}`, `${here.cloud}% cloud here and no sun in this view. Zoom out or pan to look further.`);
 }
 
 // grid of points covering the visible map area
 function gridForView() {
   const size = map.getSize();
-  const cols = COLS, rows = Math.max(3, Math.min(11, Math.round(cols * size.y / size.x)));
-  cellPx = Math.min(size.x / cols, size.y / rows);
+  const cols = COLS, rows = Math.max(3, Math.min(14, Math.round(cols * size.y / size.x)));
   const out = [];
   for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
     const p = map.containerPointToLatLng([size.x * (j + .5) / cols, size.y * (i + .5) / rows]);
     out.push([p.lat, p.lng]);
   }
-  return out;
+  return {cols, rows, pts: out};
 }
 
 async function load() {
   const id = ++loadId;
-  say('sun', 'Checking the sky…', 'Fetching cloud cover for this view.', true);
-  const grid = gridForView();
+  say(1, 'Checking the sky…', 'Fetching cloud cover for this view.', true);
+  const g = gridForView();
   const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover' +
     '&forecast_days=7&timezone=auto' +
-    '&latitude=' + grid.map(p => p[0].toFixed(3)).join(',') +
-    '&longitude=' + grid.map(p => p[1].toFixed(3)).join(',');
+    '&latitude=' + g.pts.map(p => p[0].toFixed(3)).join(',') +
+    '&longitude=' + g.pts.map(p => p[1].toFixed(3)).join(',');
   try {
     const res = await (await fetch(url)).json();
     if (res.error) throw new Error(res.reason);
     if (id !== loadId) return; // the view moved again; a newer load is in flight
-    pts = grid;
+    pts = g.pts; grid = g;
     series = (Array.isArray(res) ? res : [res]).map(r => {
       const t = r.hourly.time, c = r.hourly.cloud_cover, byDay = {};
       t.forEach((ts, i) => {
@@ -182,18 +200,18 @@ async function load() {
     });
     buildChips();
     render();
-  } catch (e) { if (id === loadId) say('cloud', 'Could not load weather', e.message); }
+  } catch (e) { if (id === loadId) say(4, 'Could not load weather', e.message); }
 }
 
 // reload the grid once the user stops panning or zooming
 map.on('moveend', () => { if (me) { clearTimeout(timer); timer = setTimeout(load, 700); } });
 
 function locate() {
-  say('sun', 'Finding you…', 'Allow location access to see the sun near you.', true);
-  if (!navigator.geolocation) { say('cloud', 'No location support', 'This browser cannot share your location.'); return; }
+  say(1, 'Finding you…', 'Allow location access to see the sun near you.', true);
+  if (!navigator.geolocation) { say(4, 'No location support', 'This browser cannot share your location.'); return; }
   navigator.geolocation.getCurrentPosition(
     p => { me = [p.coords.latitude, p.coords.longitude]; map.setView(me, 8); },
-    e => say('cloud', 'Location unavailable', e.message),
+    e => say(4, 'Location unavailable', e.message),
     {enableHighAccuracy: false, timeout: 15000});
 }
 locate();
