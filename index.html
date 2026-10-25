@@ -87,7 +87,8 @@ const ICONS = {
 const level = c => c <= 10 ? 0 : c <= SUNNY ? 1 : c <= 45 ? 2 : c <= 70 ? 3 : 4;
 const iconFor = lv => lv <= 1 ? ICONS.sun : lv === 2 || lv === 3 ? ICONS.part : ICONS.cloud;
 
-const map = L.map('map', {zoomControl: false, maxZoom: 18}).setView([0, 0], 2);
+const MAX_ZOOM = 16;     // deeper than this the base map is all house numbers and footpaths
+const map = L.map('map', {zoomControl: false, maxZoom: MAX_ZOOM}).setView([0, 0], 2);
 const layer = L.layerGroup().addTo(map);   // pin, nearest-sun marker
 const cityLayer = L.layerGroup().addTo(map); // city name labels
 const statusEl = document.getElementById('status');
@@ -180,7 +181,7 @@ function featureColor(v, classKey, kx, ky) {
 }
 
 // sort every pixel of an OSM tile into paper / street line / water / feature fill
-function classify(px) {
+function classify(px, z) {
   const cls = new Uint8Array(N * N), key = new Uint16Array(N * N);
   for (let i = 0; i < N * N; i++) {
     const r = px[i*4], g = px[i*4+1], b = px[i*4+2], a = px[i*4+3];
@@ -192,7 +193,29 @@ function classify(px) {
     if (Math.min(r, g, b) >= 228) continue;                                                                 // pale anti-aliasing fringes stay paper
     cls[i] = 3; key[i] = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
   }
+  dropSpecks(cls, z);
   return {cls, key};
+}
+
+// keep only the street network: compact bits of line (letters of labels, house numbers, dashes of footpaths
+// and boundaries) are wiped back to paper; street edges are long and thin, so they survive
+function dropSpecks(cls, z) {
+  const minLen = z >= 16 ? 30 : 14;   // deep tiles carry house numbers and street names; shallower ones have short street segments
+  const seen = new Uint8Array(N * N), stack = new Int32Array(N * N), comp = new Int32Array(N * N);
+  for (let s = 0; s < N * N; s++) {
+    if (cls[s] !== 1 || seen[s]) continue;
+    let sp = 0, n = 0, x0 = N, x1 = 0, y0 = N, y1 = 0;
+    stack[sp++] = s; seen[s] = 1;
+    while (sp) {
+      const i = stack[--sp], x = i & (N - 1), y = i >> 9;
+      comp[n++] = i;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (const j of [x > 0 ? i - 1 : -1, x < N - 1 ? i + 1 : -1, y > 0 ? i - N : -1, y < N - 1 ? i + N : -1])
+        if (j >= 0 && cls[j] === 1 && !seen[j]) { seen[j] = 1; stack[sp++] = j; }
+    }
+    const edge = x0 === 0 || y0 === 0 || x1 === N - 1 || y1 === N - 1;
+    if (Math.max(x1 - x0, y1 - y0) < (edge ? 8 : minLen)) for (let k = 0; k < n; k++) cls[comp[k]] = 0;
+  }
 }
 
 // connected patches of the same fill colour
@@ -224,7 +247,7 @@ function paintTile(canvas) {
   const {cls, lab, cx, cy, area, border, ck} = st, z = st.z, ox = st.x * 256, oy = st.y * 256;
   const cols = new Uint32Array(area.length), huge = [];
   for (let l = 0; l < area.length; l++) {
-    if (area[l] < 6) { cols[l] = PAPER; continue; }
+    if (area[l] < 14) { cols[l] = PAPER; continue; }    // label text and anti-aliasing crumbs
     const gx = ox + cx[l] / 2, gy = oy + cy[l] / 2;
     if (area[l] > HUGE) {
       const cells = new Uint32Array(16);
@@ -261,13 +284,13 @@ const SunTiles = L.GridLayer.extend({
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = N;
     const src = document.createElement('canvas'); src.width = src.height = N;
     const sctx = src.getContext('2d', {willReadFrequently: true});
-    const deep = coords.z < 18;                // use the next zoom level for double resolution
+    const deep = coords.z < MAX_ZOOM;          // use the next zoom level for double resolution (stops before house numbers)
     const jobs = deep
       ? [0, 1, 2, 3].map(k => loadTile(coords.z + 1, coords.x * 2 + (k & 1), coords.y * 2 + (k >> 1)).then(im => im && sctx.drawImage(im, (k & 1) * 256, (k >> 1) * 256)))
       : [loadTile(coords.z, coords.x, coords.y).then(im => im && sctx.drawImage(im, 0, 0, N, N))];
     Promise.all(jobs).then(() => {
       try {
-        const {cls, key} = classify(sctx.getImageData(0, 0, N, N).data);
+        const {cls, key} = classify(sctx.getImageData(0, 0, N, N).data, deep ? coords.z + 1 : coords.z);
         canvas._st = Object.assign({cls, z: coords.z, x: coords.x, y: coords.y}, label(cls, key));
         paintTile(canvas);
       } catch (e) { canvas.getContext('2d').drawImage(src, 0, 0); } // pixels unreadable: show the plain map
@@ -276,7 +299,7 @@ const SunTiles = L.GridLayer.extend({
     return canvas;
   }
 });
-const tiles = new SunTiles({tileSize: 256, maxZoom: 18, attribution: '© OpenStreetMap, weather © Open-Meteo'}).addTo(map);
+const tiles = new SunTiles({tileSize: 256, maxZoom: MAX_ZOOM, attribution: '© OpenStreetMap, weather © Open-Meteo'}).addTo(map);
 const repaintAll = () => Object.values(tiles._tiles).forEach(t => t.el && t.el._st && paintTile(t.el));
 
 // switch day, blending from the old one so squares flip across the map
