@@ -2,39 +2,94 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f6f3ee">
 <title>Sunseeker</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-  html,body{margin:0;height:100%;font-family:system-ui,sans-serif}
-  #map{position:absolute;inset:0}
-  #panel{position:absolute;z-index:1000;top:10px;left:10px;right:10px;max-width:340px;
-    background:#fff;border-radius:10px;padding:10px 14px;box-shadow:0 2px 10px #0004;font-size:14px}
-  #panel b{font-size:16px}
-  select,button{font:inherit;margin-top:6px}
-  .cell span{position:absolute;transform:translate(-50%,-50%);line-height:1;pointer-events:none}
-  #days{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
-  #days button{margin:0;padding:4px 8px;border:1px solid #ccc;border-radius:14px;background:#fff;cursor:pointer}
-  #days button.on{background:#f5b301;border-color:#f5b301;font-weight:600}
+  :root{
+    --bg:#f6f3ee; --card:rgba(255,255,255,.82); --ink:#1d1d1f; --muted:#6e6e73; --line:rgba(0,0,0,.08);
+    --sun:#f59e0b; --sun-bg:rgba(251,191,36,.30); --part:#d4a24c; --part-bg:rgba(226,196,130,.26);
+    --cloud:#64748b; --cloud-bg:rgba(100,116,139,.22); --shadow:0 8px 30px rgba(0,0,0,.12);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#16181d; --card:rgba(30,32,38,.82); --ink:#f5f5f7; --muted:#a1a1a8; --line:rgba(255,255,255,.1);
+    --sun:#fbbf24; --sun-bg:rgba(251,191,36,.28); --part:#d9b45f; --part-bg:rgba(217,180,95,.2);
+    --cloud:#94a3b8; --cloud-bg:rgba(148,163,184,.2); --shadow:0 8px 30px rgba(0,0,0,.5);
+  }}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  #map{position:absolute;inset:0;background:var(--bg)}
+  .glass{background:var(--card);backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
+    border:1px solid var(--line);box-shadow:var(--shadow)}
+
+  #status{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;max-width:420px;
+    border-radius:20px;padding:14px 16px;display:flex;gap:14px;align-items:center}
+  #status .ico{flex:none;width:46px;height:46px;border-radius:14px;display:grid;place-items:center}
+  #status .ico svg{width:26px;height:26px}
+  #status h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em}
+  #status p{margin:2px 0 0;font-size:13.5px;color:var(--muted);line-height:1.35}
+  .spin{animation:pulse 1.2s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+
+  #days{position:absolute;z-index:1000;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 14px);
+    max-width:520px;border-radius:999px;padding:5px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+  #days::-webkit-scrollbar{display:none}
+  #days button{flex:1 0 auto;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:550;
+    padding:9px 14px;border-radius:999px;cursor:pointer;transition:background .2s,color .2s}
+  #days button.on{background:var(--ink);color:var(--bg)}
+
+  #legend{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 78px);border-radius:14px;
+    padding:8px 11px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
+  #legend span{display:flex;align-items:center;gap:4px}
+  #legend svg{width:14px;height:14px}
+
+  /* map cells */
+  .cell{display:grid;place-items:center;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
+  .cell svg{width:52%;height:52%}
+  .cell.sun{background:radial-gradient(circle,var(--sun-bg),transparent 72%);color:var(--sun)}
+  .cell.part{background:radial-gradient(circle,var(--part-bg),transparent 72%);color:var(--part)}
+  .cell.cloud{background:radial-gradient(circle,var(--cloud-bg),transparent 72%);color:var(--cloud)}
+  /* mute the OSM tiles so the weather icons stand out */
+  .leaflet-tile-pane{filter:grayscale(.9) contrast(.85) brightness(1.08)}
+  @media (prefers-color-scheme:dark){.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(.8) brightness(.75) contrast(.9)}}
+  .pin{width:18px;height:18px;border-radius:50%;background:#2f7cf6;border:3px solid #fff;box-shadow:0 0 0 6px rgba(47,124,246,.25),0 2px 8px rgba(0,0,0,.3)}
+  .target{border-radius:50%;border:2px solid var(--sun);box-shadow:0 0 0 4px var(--sun-bg);transform:translate(-50%,-50%)}
+  .leaflet-control-attribution{background:var(--card)!important;color:var(--muted)!important;font-size:10px;border-radius:8px 0 0 0}
+  .leaflet-control-attribution a{color:var(--muted)!important}
+  .leaflet-tooltip{border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);box-shadow:var(--shadow);font:600 12px system-ui}
+  .leaflet-tooltip:before{display:none}
 </style>
 </head>
 <body>
 <div id="map"></div>
-<div id="panel">
-  <b>☀️ Sunseeker</b>
-  <div id="status">Finding your location…</div>
-  <button id="refresh">Refresh</button>
-  <div id="days"></div>
-</div>
+<div id="status" class="glass"></div>
+<div id="legend" class="glass"></div>
+<div id="days" class="glass"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-const COLS = 7; // grid columns across the visible map; rows follow the screen's aspect ratio
-const map = L.map('map').setView([0, 0], 2);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {attribution: '© OpenStreetMap, weather © Open-Meteo', maxZoom: 18}).addTo(map);
+const COLS = 7;       // grid columns across the visible map; rows follow the screen's aspect ratio
+const SUNNY = 25;     // % cloud cover at or below which a spot counts as sunny
+
+// Lucide-style stroke icons
+const svg = body => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+const ICONS = {
+  sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>'),
+  part: svg('<path d="M12 2v2M4.93 4.93l1.41 1.41M20 12h2M19.07 4.93l-1.41 1.41M15.947 12.65a4 4 0 0 0-5.925-4.128M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"/>'),
+  cloud: svg('<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>'),
+};
+const kind = c => c <= SUNNY ? 'sun' : c <= 60 ? 'part' : 'cloud';
+
+const map = L.map('map', {zoomControl: false}).setView([0, 0], 2);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap, weather © Open-Meteo', maxZoom: 18}).addTo(map);
 const layer = L.layerGroup().addTo(map);
 const statusEl = document.getElementById('status');
-let me = null, cellPx = 40, loadId = 0, timer = null;
+let me = null, pts = [], series = [], sel = 0, cellPx = 40, loadId = 0, timer = null;
+
+document.getElementById('legend').innerHTML =
+  `<span style="color:var(--sun)">${ICONS.sun}</span>Sunny<span style="color:var(--part)">${ICONS.part}</span>Mixed<span style="color:var(--cloud)">${ICONS.cloud}</span>Cloudy`;
 
 function km(a, b) {
   const r = Math.PI / 180, dLat = (b[0]-a[0])*r, dLon = (b[1]-a[1])*r;
@@ -42,22 +97,17 @@ function km(a, b) {
   return 12742 * Math.asin(Math.sqrt(h));
 }
 
-// cloud cover % -> icon and background tint (yellow = sun, blue-grey = overcast)
-function icon(c) { return c <= 25 ? '☀️' : c <= 60 ? '⛅' : '☁️'; }
-function colour(c) {
-  const t = c / 100, mix = (a, b) => Math.round(a + (b - a) * t);
-  return `rgb(${mix(255, 120)},${mix(210, 135)},${mix(60, 160)})`;
+function say(k, title, text, busy) {
+  statusEl.innerHTML = `<div class="ico cell ${k}" style="transform:none;background:var(--${k}-bg)">${ICONS[k]}</div>
+    <div><h1 class="${busy ? 'spin' : ''}">${title}</h1><p>${text}</p></div>`;
 }
-
-let pts = [], series = [], sel = 0; // sel: 0 = now, 1..7 = day index+1
 
 function buildChips() {
   const days = series[0].days;
   const el = document.getElementById('days');
   el.innerHTML = '';
-  const labels = ['Now', ...days.map((d, i) => i === 0 ? 'Today' : i === 1 ? 'Tomorrow' :
-    new Date(d + 'T12:00').toLocaleDateString(undefined, {weekday: 'short'}))];
-  labels.forEach((t, i) => {
+  ['Now', ...days.map((d, i) => i === 0 ? 'Today' : i === 1 ? 'Tomorrow' :
+    new Date(d + 'T12:00').toLocaleDateString(undefined, {weekday: 'short'}))].forEach((t, i) => {
     const b = document.createElement('button');
     b.textContent = t; b.className = i === sel ? 'on' : '';
     b.onclick = () => { sel = i; buildChips(); render(); };
@@ -65,48 +115,51 @@ function buildChips() {
   });
 }
 
-// value shown for a grid point: current cloud cover, or mean over daylight hours (9-17h local) of that day
-function value(p) {
-  return sel === 0 ? p.now : p.daily[sel - 1];
-}
+// current cloud cover, or the mean over daylight hours (9-17h local) of the chosen day
+const value = p => sel === 0 ? p.now : p.daily[sel - 1];
 
 function render() {
   layer.clearLayers();
-  let best = null;
   const data = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
+  let best = null;
   data.forEach(d => {
-    L.circleMarker(d.pos, {radius: cellPx / 2, stroke: false, fillOpacity: .45, fillColor: colour(d.cloud)})
-      .bindTooltip(d.cloud + '% cloud').addTo(layer);
-    L.marker(d.pos, {interactive: false, icon: L.divIcon({className: 'cell', iconSize: [0, 0],
-      html: `<span style="font-size:${Math.round(cellPx * .6)}px;opacity:${d.cloud <= 25 ? 1 : .5 + d.cloud / 200}">${icon(d.cloud)}</span>`})}).addTo(layer);
     d.dist = km(me, d.pos);
-    if (d.cloud <= 25 && (!best || d.dist < best.dist)) best = d;
+    if (d.cloud <= SUNNY && (!best || d.dist < best.dist)) best = d;
+    const s = Math.round(cellPx * 1.15);
+    L.marker(d.pos, {icon: L.divIcon({className: '', iconSize: [0, 0],
+      html: `<div class="cell ${kind(d.cloud)}" style="width:${s}px;height:${s}px">${ICONS[kind(d.cloud)]}</div>`})})
+      .bindTooltip(`${d.cloud}% cloud`).addTo(layer);
   });
-  L.marker(me).bindTooltip('You are here').addTo(layer);
   const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
-  const when = sel === 0 ? 'now' : sel === 1 ? 'today' : sel === 2 ? 'tomorrow' : 'that day';
-  const night = sel === 0 && !here.day ? ' (it is night there now)' : '';
-  if (here.cloud <= 25) statusEl.textContent = `Sunny at your location ${when} (${here.cloud}% cloud)${night}.`;
-  else if (best) {
-    statusEl.textContent = `${here.cloud}% cloud here ${when}. Nearest sun: ${best.dist.toFixed(0)} km away (${best.cloud}% cloud)${night}.`;
-    L.polyline([me, best.pos], {color: '#e69500', dashArray: '6'}).addTo(layer);
-  } else statusEl.textContent = `${here.cloud}% cloud here ${when}, and no sunny spot in this view. Zoom out or pan to look further.`;
+  const when = ['now', 'today', 'tomorrow'][sel] || 'that day';
+  const night = sel === 0 && !here.day ? ' It is night there now.' : '';
+  if (best && here.cloud > SUNNY) {
+    L.polyline([me, best.pos], {color: '#f59e0b', weight: 2, dashArray: '2 7', lineCap: 'round'}).addTo(layer);
+    L.marker(best.pos, {icon: L.divIcon({className: '', iconSize: [0, 0],
+      html: `<div class="target" style="width:${cellPx}px;height:${cellPx}px"></div>`}), interactive: false}).addTo(layer);
+  }
+  L.marker(me, {icon: L.divIcon({className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="pin"></div>'}), interactive: false}).addTo(layer);
+  if (here.cloud <= SUNNY) say('sun', `Sunny ${when}`, `${here.cloud}% cloud at your location.${night}`);
+  else if (best) say(kind(here.cloud), `${here.cloud}% cloud ${when}`, `Nearest sun is ${best.dist.toFixed(0)} km away (${best.cloud}% cloud).${night}`);
+  else say(kind(here.cloud), `Cloudy ${when}`, `${here.cloud}% cloud here and no sun in this view. Zoom out or pan to look further.`);
 }
 
 // grid of points covering the visible map area
 function gridForView() {
-  const size = map.getSize(), b = map.getBounds();
+  const size = map.getSize();
   const cols = COLS, rows = Math.max(3, Math.min(11, Math.round(cols * size.y / size.x)));
   cellPx = Math.min(size.x / cols, size.y / rows);
   const out = [];
-  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++)
-    out.push(map.containerPointToLatLng([size.x * (j + .5) / cols, size.y * (i + .5) / rows]));
-  return out.map(p => [p.lat, p.lng]);
+  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
+    const p = map.containerPointToLatLng([size.x * (j + .5) / cols, size.y * (i + .5) / rows]);
+    out.push([p.lat, p.lng]);
+  }
+  return out;
 }
 
 async function load() {
   const id = ++loadId;
-  statusEl.textContent = 'Fetching cloud cover…';
+  say('sun', 'Checking the sky…', 'Fetching cloud cover for this view.', true);
   const grid = gridForView();
   const url = 'https://api.open-meteo.com/v1/forecast?current=cloud_cover,is_day&hourly=cloud_cover' +
     '&forecast_days=7&timezone=auto' +
@@ -129,20 +182,20 @@ async function load() {
     });
     buildChips();
     render();
-  } catch (e) { if (id === loadId) statusEl.textContent = 'Could not load weather: ' + e.message; }
+  } catch (e) { if (id === loadId) say('cloud', 'Could not load weather', e.message); }
 }
 
 // reload the grid once the user stops panning or zooming
 map.on('moveend', () => { if (me) { clearTimeout(timer); timer = setTimeout(load, 700); } });
 
 function locate() {
-  if (!navigator.geolocation) { statusEl.textContent = 'Geolocation not supported.'; return; }
+  say('sun', 'Finding you…', 'Allow location access to see the sun near you.', true);
+  if (!navigator.geolocation) { say('cloud', 'No location support', 'This browser cannot share your location.'); return; }
   navigator.geolocation.getCurrentPosition(
     p => { me = [p.coords.latitude, p.coords.longitude]; map.setView(me, 8); },
-    e => { statusEl.textContent = 'Location denied: ' + e.message; },
+    e => say('cloud', 'Location unavailable', e.message),
     {enableHighAccuracy: false, timeout: 15000});
 }
-document.getElementById('refresh').onclick = () => me ? load() : locate();
 locate();
 </script>
 </body>
