@@ -60,6 +60,15 @@
   .blk.b0,.blk.b1,.blk.b2{color:rgba(29,29,31,.8)}.blk.b3,.blk.b4{color:rgba(255,255,255,.92)}
   .b0{--c:var(--b0)}.b1{--c:var(--b1)}.b2{--c:var(--b2)}.b3{--c:var(--b3)}.b4{--c:var(--b4)}
   .field{mix-blend-mode:multiply}
+  /* day-switch motion: the new map wipes in from the direction of travel; the old one is removed once it has covered it */
+  @keyframes fadein{from{opacity:0}}
+  @keyframes wipeR{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+  @keyframes wipeL{from{clip-path:inset(0 0 0 100%)}to{clip-path:inset(0 0 0 0)}}
+  .anim-fade{animation:fadein .5s ease backwards}
+  .anim-wipeR{animation:wipeR .8s cubic-bezier(.4,0,.2,1) backwards}
+  .anim-wipeL{animation:wipeL .8s cubic-bezier(.4,0,.2,1) backwards}
+  #status>*{animation:fadein .35s ease backwards}
+  @media (prefers-reduced-motion:reduce){.anim-fade,.anim-wipeR,.anim-wipeL,#status>*{animation:none}}
   /* wash out the OSM tiles so the blocks dominate */
   .leaflet-tile-pane{filter:grayscale(1) contrast(.7) brightness(1.2)}
   @media (prefers-color-scheme:dark){.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(1) brightness(.6) contrast(.9)}}
@@ -95,7 +104,9 @@ const iconFor = lv => lv <= 1 ? ICONS.sun : lv === 2 || lv === 3 ? ICONS.part : 
 const map = L.map('map', {zoomControl: false}).setView([0, 0], 2);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenStreetMap, weather © Open-Meteo', maxZoom: 18}).addTo(map);
-const layer = L.layerGroup().addTo(map);
+let layer = L.layerGroup().addTo(map);
+let anim = 'fade'; // transition for the next render: 'fade', or 1 / -1 for a wipe in that direction
+const animClass = () => anim === 1 ? 'anim-wipeR' : anim === -1 ? 'anim-wipeL' : 'anim-fade';
 const statusEl = document.getElementById('status');
 let me = null, pts = [], series = [], sel = 0, grid = {cols: 3, rows: 3}, loadId = 0, timer = null;
 
@@ -121,7 +132,7 @@ function buildChips() {
     new Date(d + 'T12:00').toLocaleDateString(undefined, {weekday: 'short'}))].forEach((t, i) => {
     const b = document.createElement('button');
     b.textContent = t; b.className = i === sel ? 'on' : '';
-    b.onclick = () => { sel = i; buildChips(); render(); };
+    b.onclick = () => { if (i === sel) return; anim = i > sel ? 1 : -1; sel = i; buildChips(); render(); anim = 'fade'; };
     el.appendChild(b);
   });
 }
@@ -148,7 +159,10 @@ const sunLine = (best, info, night) => `Nearest sun: ${fmtDrive(info)} (${best.c
 
 function render() {
   const rid = ++renderId;
-  layer.clearLayers();
+  const prev = layer;                         // keep the old map in place until the new one has animated over it
+  layer = L.layerGroup().addTo(map);
+  prev.eachLayer(l => { if (!(l instanceof L.ImageOverlay || l instanceof L.Rectangle)) prev.removeLayer(l); }); // only the colour fields linger
+  setTimeout(() => map.removeLayer(prev), 900);
   const data = lastData = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
   let best = null;
   data.forEach(d => {
@@ -207,7 +221,7 @@ function drawField(data) {
     img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  L.imageOverlay(cv.toDataURL(), grid.bounds, {opacity: .8, interactive: false, className: 'field'}).addTo(layer);
+  L.imageOverlay(cv.toDataURL(), grid.bounds, {opacity: .8, interactive: false, className: 'field ' + animClass()}).addTo(layer);
 }
 
 // grid of points covering the visible map area
@@ -271,8 +285,11 @@ function drawMondrian(data) {
     const mem = [];
     for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) { seen.add(at(r + i, c + j)); mem.push(data[at(r + i, c + j)]); }
     const avg = Math.round(mem.reduce((a, m) => a + m.cloud, 0) / mem.length);
-    L.rectangle([ll(c * cw, r * ch), ll((c + w) * cw, (r + h) * ch)], {color: '#111', weight: 5, opacity: 1,
-      fillColor: lv, fillOpacity: lv === '#ffffff' ? .9 : .96, lineJoin: 'miter'}).bindTooltip(`${avg}% cloud`).addTo(layer);
+    const rect = L.rectangle([ll(c * cw, r * ch), ll((c + w) * cw, (r + h) * ch)], {color: '#111', weight: 5, opacity: 1,
+      fillColor: lv, fillOpacity: lv === '#ffffff' ? .9 : .96, lineJoin: 'miter', className: 'anim-fade'})
+      .bindTooltip(`${avg}% cloud`).addTo(layer);
+    const el = rect.getElement(); // stagger the blocks across the screen in the direction of travel
+    if (el) el.style.animationDelay = Math.round(((anim === -1 ? cols - 1 - c : c) / cols) * 350) + 'ms';
   }
 }
 
@@ -353,7 +370,7 @@ function drawParcels(data) {
     img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2]; img.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  L.imageOverlay(cv.toDataURL(), grid.bounds, {opacity: 1, interactive: false}).addTo(layer);
+  L.imageOverlay(cv.toDataURL(), grid.bounds, {opacity: 1, interactive: false, className: animClass()}).addTo(layer);
 }
 
 // tap anywhere to read the cloud cover there
