@@ -22,36 +22,62 @@
   .glass{background:var(--card);backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
     border:1px solid var(--line);box-shadow:var(--shadow)}
 
-  /* every control lives in one stack along the top edge */
-  #top{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;max-width:520px;
-    display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  /* every control sits side by side in one row along the top edge (it only wraps when the screen is too narrow) */
+  #top{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px;pointer-events:none}
   #top>*{pointer-events:auto}
-  #toolbar{display:flex;gap:8px;align-items:center;pointer-events:none}
+  #toolbar{flex:0 1 auto;min-width:0;display:flex;gap:8px;align-items:center;pointer-events:none}
   #toolbar>*{pointer-events:auto}
-  #status{border-radius:20px;padding:14px 16px;display:flex;gap:14px;align-items:center}
-  #status .ico{flex:none;width:46px;height:46px;border-radius:6px;display:grid;place-items:center;background:var(--c);border:2px solid #111}
-  #status .ico svg{width:26px;height:26px}
+  #search{flex:1 1 100%;max-width:520px}
+  #status{flex:0 1 420px;min-width:260px;height:58px;border-radius:999px;padding:6px 18px 6px 6px;display:flex;gap:12px;align-items:center}
+  #status>div:last-child{min-width:0}
+  #status .ico{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--c);border:2px solid #111}
+  #status .ico svg{width:24px;height:24px}
+  #status h1,#status p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ico.b0,.ico.b4{color:#fff}.ico.b1,.ico.b2,.ico.b3{color:#1d1d1f}
+  /* status icon, legend and city swatches follow the chosen map style */
+  body.s-soft{--b0:#ef7340;--b1:#f7b38f;--b2:#fde8d4;--b3:#d3ebf4;--b4:#8ccfe8}
+  body.s-soft .ico.b4{color:#1d1d1f}
+  body.s-vivid{--b0:#f15f4c;--b1:#f9c74f;--b2:#f2e8cf;--b3:#7ec4cf;--b4:#2a6f97}
+  body.s-jewel{--b0:#e8562a;--b1:#f2a541;--b2:#f5d0c5;--b3:#2a9d8f;--b4:#1d3557}
+  body.s-heat{--b0:#d73027;--b1:#fc8d59;--b2:#fee090;--b3:#91bfdb;--b4:#4575b4}
+  body.s-watercolor{--b0:#ff5d8f;--b1:#ffa94d;--b2:#ffe066;--b3:#8ce99a;--b4:#4dabf7}
+  #style{flex:none;height:46px;border-radius:999px;padding:0 14px 0 12px;display:flex;gap:7px;align-items:center;
+    color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  #style svg{width:20px;height:20px}
   .b0{--c:var(--b0)}.b1{--c:var(--b1)}.b2{--c:var(--b2)}.b3{--c:var(--b3)}.b4{--c:var(--b4)}
-  #status h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em}
-  #status p{margin:2px 0 0;font-size:13.5px;color:var(--muted);line-height:1.35}
+  #status h1{margin:0;font-size:15.5px;font-weight:650;letter-spacing:-.01em;line-height:1.25}
+  #status p{margin:1px 0 0;font-size:12.5px;color:var(--muted);line-height:1.3}
   #status>*{animation:fadein .35s ease backwards}
   .spin{animation:pulse 1.2s ease-in-out infinite}
   @keyframes pulse{50%{opacity:.35}}
   @keyframes fadein{from{opacity:0}}
 
-  #days{flex:1;min-width:0;border-radius:999px;padding:5px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+  #days{flex:0 1 auto;min-width:0;max-width:520px;border-radius:999px;padding:5px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
   #days::-webkit-scrollbar{display:none}
   #days button{flex:1 0 auto;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:550;
     padding:9px 14px;border-radius:999px;cursor:pointer;transition:background .2s,color .2s}
   #days button.on{background:#111;color:#fff}
 
-  #locate{flex:none;width:46px;height:46px;
+  #find{flex:none;width:46px;height:46px;
     border-radius:50%;display:grid;place-items:center;color:var(--ink);cursor:pointer;padding:0}
-  #locate svg{width:22px;height:22px}
+  #find svg{width:22px;height:22px}
+  /* zoom and locate, stacked in one rounded column at the bottom right */
+  #mapctl{position:absolute;z-index:1000;right:12px;bottom:calc(env(safe-area-inset-bottom) + 28px);
+    display:flex;flex-direction:column;border-radius:16px;overflow:hidden}
+  #mapctl button{width:46px;height:46px;display:grid;place-items:center;border:0;background:transparent;color:var(--ink);cursor:pointer;padding:0}
+  #mapctl button+button{border-top:1px solid var(--line)}
+  #mapctl button:hover{background:rgba(127,127,127,.12)}
+  #mapctl svg{width:22px;height:22px}
+  #search{display:flex;gap:6px;align-items:center;border-radius:999px;padding:5px}
+  #search[hidden]{display:none}
+  #search input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink);font:inherit;font-size:16px;padding:8px 12px;outline:none}
+  #search button{flex:none;border:0;border-radius:999px;font:inherit;font-size:13.5px;font-weight:600;padding:9px 14px;cursor:pointer}
+  #search .go{background:#111;color:#fff}
+  #search .gps{background:transparent;color:var(--muted)}
   #locate.busy svg{animation:pulse 1s ease-in-out infinite}
-  #legend{align-self:flex-start;border-radius:14px;
-    padding:8px 11px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
+  #legend{flex:none;height:46px;border-radius:999px;
+    padding:0 14px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
   #legend span{display:flex;align-items:center;gap:4px}
   #legend i{width:14px;height:14px;display:inline-block;background:var(--c);border:1.5px solid #111}
 
@@ -74,9 +100,20 @@
   <div id="status" class="glass"></div>
   <div id="toolbar">
     <div id="days" class="glass"></div>
-    <button id="locate" class="glass" aria-label="Centre on my location"></button>
+    <button id="find" class="glass" aria-label="Search for a ZIP code or town" title="Search for a ZIP code or town"></button>
+    <button id="style" class="glass"></button>
   </div>
   <div id="legend" class="glass"></div>
+  <form id="search" class="glass" hidden>
+    <input id="q" type="search" placeholder="ZIP code or town" autocomplete="postal-code" enterkeyhint="search" aria-label="ZIP code or town">
+    <button class="go" type="submit">Go</button>
+    <button class="gps" type="button" id="useGps" title="Use this device's location">Use my location</button>
+  </form>
+</div>
+<div id="mapctl" class="glass">
+  <button id="zin" aria-label="Zoom in" title="Zoom in"></button>
+  <button id="zout" aria-label="Zoom out" title="Zoom out"></button>
+  <button id="locate" aria-label="Centre on my location" title="Centre on my location"></button>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
@@ -102,8 +139,15 @@ const cityLayer = L.layerGroup().addTo(map); // city name labels
 const statusEl = document.getElementById('status');
 let me = null, sel = 0, loadId = 0, timer = null, staleNote = '';
 
-document.getElementById('legend').innerHTML =
-  `<span><i class="b0"></i><i class="b1"></i>Sunny</span><span><i class="b2"></i>Mixed</span><span><i class="b4"></i>Cloudy</span>`;
+// legend: Mondrian explains its three colours; the filled styles show their scale from clear to overcast
+function drawLegend() {
+  document.getElementById('legend').innerHTML = styleKey === 'mondrian'
+    ? `<span title="Up to ${SUNNY}% cloud: buildings and parks turn red and yellow"><i class="b0"></i><i class="b1"></i>Sunny</span>` +
+      `<span title="Around half cloud: most things stay white"><i class="b2"></i>Mixed</span>` +
+      `<span title="Mostly overcast: buildings and parks turn blue"><i class="b4"></i>Cloudy</span>`
+    : `<span title="Clear sky">Sunny</span><span style="gap:0" title="Cloud cover: under 10%, 10–25%, 25–45%, 45–70%, over 70%">` +
+      `<i class="b0"></i><i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i></span><span title="Overcast">Cloudy</span>`;
+}
 
 function km(a, b) {
   const r = Math.PI / 180, dLat = (b[0]-a[0])*r, dLon = (b[1]-a[1])*r;
@@ -206,6 +250,7 @@ function classify(px, z) {
     const r = px[i*4], g = px[i*4+1], b = px[i*4+2], a = px[i*4+3];
     if (a < 200) continue;
     if (Math.abs(r - 170) < 14 && Math.abs(g - 211) < 12 && Math.abs(b - 223) < 12) { cls[i] = 2; continue; }
+    if (r >= 247 && g >= 247 && b >= 247) { cls[i] = 4; continue; }                                        // white road fill (and label halos)
     if (Math.abs(r - g) < 5 && Math.abs(g - b) < 5) { cls[i] = r >= 105 && r <= 205 ? 1 : 0; continue; } // grey casing = street, rest paper
     const sat = Math.max(r, g, b) - Math.min(r, g, b);
     if (sat >= 85 || ROAD_FILLS.some(([R, G, B]) => Math.abs(r - R) < 10 && Math.abs(g - G) < 10 && Math.abs(b - B) < 10)) { cls[i] = 1; continue; } // road casings and fills
@@ -217,13 +262,14 @@ function classify(px, z) {
   return {cls, key};
 }
 
-// keep only the street network: compact bits of line (letters of labels, house numbers, dashes of footpaths
-// and boundaries) are wiped back to paper; street edges are long and thin, so they survive
+// keep only the street network: compact bits of line (letters of labels with their white halos, house numbers,
+// dashes of footpaths and boundaries) are wiped back to paper; streets are long and thin, so they survive
+const isStreet = c => c === 1 || c === 4;   // 1 = casing / coloured fill, 4 = white fill
 function dropSpecks(cls, z) {
   const minLen = z >= 16 ? 30 : 14;   // deep tiles carry house numbers and street names; shallower ones have short street segments
   const seen = new Uint8Array(N * N), stack = new Int32Array(N * N), comp = new Int32Array(N * N);
   for (let s = 0; s < N * N; s++) {
-    if (cls[s] !== 1 || seen[s]) continue;
+    if (!isStreet(cls[s]) || seen[s]) continue;
     let sp = 0, n = 0, x0 = N, x1 = 0, y0 = N, y1 = 0;
     stack[sp++] = s; seen[s] = 1;
     while (sp) {
@@ -231,7 +277,7 @@ function dropSpecks(cls, z) {
       comp[n++] = i;
       if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
       for (const j of [x > 0 ? i - 1 : -1, x < N - 1 ? i + 1 : -1, y > 0 ? i - N : -1, y < N - 1 ? i + N : -1])
-        if (j >= 0 && cls[j] === 1 && !seen[j]) { seen[j] = 1; stack[sp++] = j; }
+        if (j >= 0 && isStreet(cls[j]) && !seen[j]) { seen[j] = 1; stack[sp++] = j; }
     }
     const edge = x0 === 0 || y0 === 0 || x1 === N - 1 || y1 === N - 1;
     if (Math.max(x1 - x0, y1 - y0) < (edge ? 8 : minLen)) for (let k = 0; k < n; k++) cls[comp[k]] = 0;
@@ -259,10 +305,119 @@ function label(cls, key) {
   return {lab, cx, cy, area};
 }
 
+// pieces of bare land between streets, water and features (the "lots" of the filled styles)
+function labelPaper(cls) {
+  const plab = new Int32Array(N * N).fill(-1), pcx = [], pcy = [], parea = [], pedge = [], stack = new Int32Array(N * N);
+  for (let s = 0; s < N * N; s++) {
+    if (cls[s] !== 0 || plab[s] >= 0) continue;
+    const id = parea.length;
+    let n = 0, ax = 0, ay = 0, sp = 0, edge = false;
+    stack[sp++] = s; plab[s] = id;
+    while (sp) {
+      const i = stack[--sp], x = i & (N - 1), y = i >> 9;
+      n++; ax += x; ay += y;
+      if (x === 0 || y === 0 || x === N - 1 || y === N - 1) edge = true;
+      if (x > 0 && plab[i-1] < 0 && cls[i-1] === 0) { plab[i-1] = id; stack[sp++] = i - 1; }
+      if (x < N-1 && plab[i+1] < 0 && cls[i+1] === 0) { plab[i+1] = id; stack[sp++] = i + 1; }
+      if (y > 0 && plab[i-N] < 0 && cls[i-N] === 0) { plab[i-N] = id; stack[sp++] = i - N; }
+      if (y < N-1 && plab[i+N] < 0 && cls[i+N] === 0) { plab[i+N] = id; stack[sp++] = i + N; }
+    }
+    pcx.push(ax / n); pcy.push(ay / n); parea.push(n); pedge.push(edge);
+  }
+  return {plab, pcx, pcy, parea, pedge};
+}
+
+// ---- map styles; the button in the top bar cycles through them ----
+const hex = h => pack(parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16));
+const STYLES = {
+  mondrian: {name: 'Mondrian'},
+  // every lot filled; colours by cloud level (0 clearest ... 4 overcast), a few shades per level for texture
+  soft: {name: 'Soft', street: '#f6f6f4', water: '#c4e4f1', bands: [
+    ['#ef7340', '#f08a5d', '#e8603c'], ['#f7b38f', '#f9c3a3', '#f4a582'], ['#fde8d4', '#fbeedd', '#f9e0c7'],
+    ['#d3ebf4', '#c6e6f2', '#dceff6'], ['#a9dcef', '#8ccfe8', '#b5e2f2']]},
+  vivid: {name: 'Vivid', street: '#fffaf0', water: '#a8dadc', bands: [
+    ['#f6a13a', '#f15f4c', '#f9c74f', '#f4845f', '#ee4266'], ['#f9c74f', '#f6a13a', '#f7b7a3', '#f4845f'],
+    ['#f2e8cf', '#e9c46a', '#a8dadc', '#f7b7a3', '#cdb4db'], ['#7ec4cf', '#a8dadc', '#9ad1d4', '#cdb4db'],
+    ['#3d8eb9', '#2a6f97', '#61a5c2', '#468faf']]},
+  // deep jewel tones with dark-edged white streets, like the Houston poster
+  jewel: {name: 'Jewel', street: '#ffffff', casing: '#2b2b2b', water: '#9db8c7', bands: [
+    ['#e8562a', '#f2a541', '#d1495b', '#c8553d'], ['#f2a541', '#e9c46a', '#f4a59a', '#c8553d'],
+    ['#f5d0c5', '#e7d8c9', '#8fbfb3', '#c9a66b'], ['#2a9d8f', '#5fa8a0', '#457b9d', '#8d6a9f'],
+    ['#1d3557', '#264653', '#3d405b', '#6d2e46', '#22223b']]},
+  // a smooth red-yellow-blue ramp, one exact colour per lot, like a data map
+  heat: {name: 'Heat', street: '#ffffff', water: '#d4e6ee',
+    ramp: [[0, '#d73027'], [20, '#fc8d59'], [40, '#fee090'], [60, '#e0f3f8'], [80, '#91bfdb'], [100, '#4575b4']]},
+  // colour flows continuously across lots, warm to cool, with white streets drawn over it
+  watercolor: {name: 'Watercolor', street: '#ffffff', water: '#e3f4f7', smooth: true,
+    ramp: [[0, '#ff5d8f'], [20, '#ffa94d'], [40, '#ffe066'], [60, '#8ce99a'], [80, '#4dabf7'], [100, '#7c6cf2']]},
+};
+const STYLE_ORDER = ['mondrian', 'soft', 'vivid', 'jewel', 'heat', 'watercolor'];
+for (const s of Object.values(STYLES)) {
+  if (s.bands) s.bands = s.bands.map(b => b.map(hex));
+  if (s.ramp) s.ramp = s.ramp.map(([v, h]) => [v, [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16))]);
+  if (s.street) { s.streetC = hex(s.street); s.casingC = hex(s.casing || s.street); s.waterC = hex(s.water); s.noneC = hex('#eeeeec'); }
+}
+
+// the style's ramp colour for a cloud value, as [r, g, b]
+function rampRGB(ramp, v) {
+  let k = 1; while (k < ramp.length - 1 && v > ramp[k][0]) k++;
+  const [a, ca] = ramp[k - 1], [b, cb] = ramp[k], t = Math.max(0, Math.min(1, (v - a) / (b - a)));
+  return ca.map((x, i) => Math.round(x + (cb[i] - x) * t));
+}
+let styleKey = (() => { try { return localStorage.getItem('sunStyle'); } catch (e) { return null; } })();
+if (!STYLES[styleKey]) styleKey = 'mondrian';
+
+// colour of one lot: its cloud level picks the shade family; small lots vary within it, big or tile-cut ones
+// take the family's first shade so neighbouring tiles agree
+function lotColor(sty, gx, gy, z, plain) {
+  if (!wx.size) return sty.noneC;
+  const ll = map.unproject(L.point(gx, gy), z), v = cloudLL(ll.lat, ll.lng);
+  if (v == null) return sty.noneC;
+  if (sty.ramp) return pack(...rampRGB(sty.ramp, v));
+  const fam = sty.bands[level(v)];
+  return plain ? fam[0] : fam[Math.floor(hash3(Math.floor(ll.lat / .0003), Math.floor(ll.lng / .0003), 2) * fam.length)];
+}
+
+function paintLots(canvas, sty) {
+  const st = canvas._st;
+  if (!st.plab) Object.assign(st, labelPaper(st.cls));
+  const {cls, lab, cx, cy, area, plab, pcx, pcy, parea, pedge} = st, z = st.z, ox = st.x * 256, oy = st.y * 256;
+  const pcol = new Uint32Array(parea.length), fcol = new Uint32Array(area.length);
+  for (let p = 0; p < parea.length; p++) pcol[p] = lotColor(sty, ox + pcx[p] / 2, oy + pcy[p] / 2, z, pedge[p] || parea[p] > HUGE);
+  for (let l = 0; l < area.length; l++) fcol[l] = lotColor(sty, ox + cx[l] / 2, oy + cy[l] / 2, z, area[l] > HUGE);
+  const ctx = canvas.getContext('2d'), img = ctx.createImageData(N, N), out = new Uint32Array(img.data.buffer);
+  if (sty.smooth) {
+    // watercolour: ramp colours at the corners of 16px blocks, blended per pixel, each lot a touch lighter or darker
+    const G = 33, grid = new Float32Array(G * G * 3);
+    for (let j = 0; j < G; j++) for (let k = 0; k < G; k++) {
+      const ll = map.unproject(L.point(ox + k * 8, oy + j * 8), z), v = wx.size ? cloudLL(ll.lat, ll.lng) : null;
+      const c = v == null ? [238, 238, 236] : rampRGB(sty.ramp, v);
+      grid.set(c, (j * G + k) * 3);
+    }
+    const shadeOf = (id, salt) => .92 + hash3(id, salt, st.x * 7 + st.y) * .16;
+    const pshade = parea.map((_, p) => shadeOf(p, 1)), fshade = area.map((_, l) => shadeOf(l, 2));
+    for (let i = 0; i < N * N; i++) {
+      const c = cls[i];
+      if (c !== 0 && c !== 3) { out[i] = c === 2 ? sty.waterC : sty.streetC; continue; }
+      const x = i & 511, y = i >> 9, fx = x / 16, fy = y / 16, k0 = Math.min(31, fx | 0), j0 = Math.min(31, fy | 0), tx = fx - k0, ty = fy - j0;
+      const s = c === 0 ? pshade[plab[i]] : fshade[lab[i]], a = (j0 * G + k0) * 3, b = a + 3, d = a + G * 3, e = d + 3;
+      const ch = o => Math.min(255, ((grid[a+o] * (1 - tx) + grid[b+o] * tx) * (1 - ty) + (grid[d+o] * (1 - tx) + grid[e+o] * tx) * ty) * s) | 0;
+      out[i] = pack(ch(0), ch(1), ch(2));
+    }
+  } else {
+    for (let i = 0; i < N * N; i++) {
+      const c = cls[i];
+      out[i] = c === 0 ? pcol[plab[i]] : c === 3 ? fcol[lab[i]] : c === 2 ? sty.waterC : c === 1 ? sty.casingC : sty.streetC;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 const HUGE = 30000;   // patches bigger than this are split into 128px cells so open land is not one flat slab
 
 function paintTile(canvas) {
   const st = canvas._st; if (!st) return;
+  if (styleKey !== 'mondrian') return paintLots(canvas, STYLES[styleKey]);
   const {cls, lab, cx, cy, area} = st, z = st.z, ox = st.x * 256, oy = st.y * 256;
   const cols = new Uint32Array(area.length), huge = [];
   for (let l = 0; l < area.length; l++) {
@@ -336,9 +491,11 @@ function applySel(animate, done) {
 }
 
 // ---------------------------------------------------------------------------------------------
+const esc = t => String(t).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 function say(lv, title, text, busy) {
   statusEl.innerHTML = `<div class="ico b${lv}">${iconFor(lv)}</div>
-    <div><h1 class="${busy ? 'spin' : ''}">${title}</h1><p>${text}</p></div>`;
+    <div><h1 class="${busy ? 'spin' : ''}">${esc(title)}</h1><p>${esc(text)}</p></div>`;
+  statusEl.title = `${title}. ${text}`;  // the card is one line, so hovering shows the full message
 }
 
 function buildChips() {
@@ -349,6 +506,8 @@ function buildChips() {
     new Date(d + 'T12:00').toLocaleDateString(undefined, {weekday: 'short'}))].forEach((t, i) => {
     const b = document.createElement('button');
     b.textContent = t; b.className = i === sel ? 'on' : '';
+    b.title = i === 0 ? 'Cloud cover right now'
+      : `Average cloud cover 9am–5pm, ${new Date(days[i - 1] + 'T12:00').toLocaleDateString(undefined, {weekday: 'long', month: 'short', day: 'numeric'})}`;
     b.onclick = () => { if (i === sel) return; sel = i; buildChips(); render(true); };
     el.appendChild(b);
   });
@@ -409,7 +568,8 @@ function drawCities() {
   cityLayer.clearLayers();
   if (!wx.size) return;
   const size = map.getSize(), topH = document.getElementById('top').getBoundingClientRect().bottom + 6;
-  const taken = [[0, 0, size.x, topH], [0, size.y - 24, size.x, size.y]]; // keep clear of the controls and the credits line
+  const ctl = document.getElementById('mapctl').getBoundingClientRect();
+  const taken = [[0, 0, size.x, topH], [0, size.y - 24, size.x, size.y], [ctl.left - 6, ctl.top - 6, size.x, size.y]]; // keep clear of the controls and the credits line
   if (me) { const m = map.latLngToContainerPoint(me); taken.push([m.x - 14, m.y - 14, m.x + 14, m.y + 14]); } // and of your own dot
   let n = 0;
   for (const c of cities) {
@@ -457,7 +617,8 @@ function render(animate) {
       if (rid !== renderId) return; // the view changed while routing
       showRoute(i);
       target.setTooltipContent(fmtDrive(i));
-      const p = statusEl.querySelector('p'); if (p) p.textContent = sunLine(best, i, night);
+      const p = statusEl.querySelector('p');
+      if (p) { p.textContent = sunLine(best, i, night); statusEl.title = `${statusEl.querySelector('h1').textContent}. ${p.textContent}`; }
     });
   }
   L.marker(me, {icon: L.divIcon({className: '', iconSize: [20, 20], iconAnchor: [10, 10], html: '<div class="pin"></div>'}), interactive: false}).addTo(layer);
@@ -542,10 +703,87 @@ map.on('popupclose', () => { if (!refreshing) { pick = null; pickGroup.clearLaye
 // reload the weather once the user stops panning or zooming
 map.on('moveend', () => { if (me) { clearTimeout(timer); timer = setTimeout(load, 700); } });
 
+// ---- where you are: device location, or a ZIP code / town typed in; the choice is remembered ----
+const store = {
+  get: k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+  set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+const searchEl = document.getElementById('search'), q = document.getElementById('q');
+
+function goTo(ll, zoomTo) {
+  me = ll;
+  map.setView(me, zoomTo);
+  clearTimeout(timer); timer = setTimeout(load, 700); // also when the view did not actually move
+}
+
+function showSearch(title, text) {
+  searchEl.hidden = false;
+  say(1, title, text);
+  q.focus();
+}
+
+// look a ZIP code or town up with Open-Meteo's geocoder
+searchEl.onsubmit = async e => {
+  e.preventDefault();
+  const text = q.value.trim();
+  if (text.length < 2) return;
+  say(1, 'Looking it up…', text, true);
+  try {
+    const r = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(text)}&count=1&language=en&format=json`)).json();
+    const g = r.results && r.results[0];
+    if (!g) { say(4, 'Not found', `Couldn't find "${text}". Try another ZIP code or a town name.`); return; }
+    store.set('sunPlace', {ll: [g.latitude, g.longitude], name: g.name});
+    store.set('sunMode', 'place');
+    searchEl.hidden = true; q.blur();
+    goTo([g.latitude, g.longitude], 10);
+  } catch (err) { say(4, 'Search failed', 'Check your connection and try again.'); }
+};
+
+function locate() {
+  searchEl.hidden = true;
+  say(1, 'Finding you…', 'Allow location access to see the sun near you.', true);
+  if (!navigator.geolocation) { showSearch('No location support', 'Type a ZIP code or town instead.'); return; }
+  navigator.geolocation.getCurrentPosition(
+    p => { store.set('sunMode', 'gps'); store.set('sunPlace', null); goTo([p.coords.latitude, p.coords.longitude], 10); },
+    () => showSearch('Location unavailable', 'Type a ZIP code or town instead.'),
+    {enableHighAccuracy: false, timeout: 15000});
+}
+document.getElementById('useGps').onclick = locate;
+
+// style toggle: each tap moves to the next look and redraws the tiles from their cached analysis
+const styleBtn = document.getElementById('style');
+function applyStyle() {
+  document.body.className = 's-' + styleKey;
+  const next = STYLES[STYLE_ORDER[(STYLE_ORDER.indexOf(styleKey) + 1) % STYLE_ORDER.length]].name;
+  styleBtn.innerHTML = svg('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18"/>') + esc(STYLES[styleKey].name);
+  styleBtn.title = `Map style: ${STYLES[styleKey].name}. Click for ${next}`;
+  drawLegend();
+  repaintAll();
+  if (wx.size) drawCities();
+}
+styleBtn.onclick = () => {
+  styleKey = STYLE_ORDER[(STYLE_ORDER.indexOf(styleKey) + 1) % STYLE_ORDER.length];
+  try { localStorage.setItem('sunStyle', styleKey); } catch (e) {}
+  applyStyle();
+};
+applyStyle();
+
+const findBtn = document.getElementById('find');
+findBtn.innerHTML = svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>');
+findBtn.onclick = () => { if (searchEl.hidden) { searchEl.hidden = false; q.focus(); } else searchEl.hidden = true; };
+
+const zin = document.getElementById('zin'), zout = document.getElementById('zout');
+zin.innerHTML = svg('<path d="M12 5v14M5 12h14"/>');
+zout.innerHTML = svg('<path d="M5 12h14"/>');
+zin.onclick = () => map.zoomIn();
+zout.onclick = () => map.zoomOut();
+
 const locBtn = document.getElementById('locate');
 locBtn.innerHTML = ICONS.locate;
-// jump back to the user's position (fresh fix) and zoom in on it
+// jump back to the device's position (fresh fix), or to the typed-in place if location is off
 locBtn.onclick = () => {
+  const place = store.get('sunPlace');
+  if (place && store.get('sunMode') === 'place') { map.flyTo(place.ll, 10); return; }
   if (!navigator.geolocation) return;
   locBtn.classList.add('busy');
   navigator.geolocation.getCurrentPosition(
@@ -554,15 +792,11 @@ locBtn.onclick = () => {
     {enableHighAccuracy: true, timeout: 10000, maximumAge: 30000});
 };
 
-function locate() {
-  say(1, 'Finding you…', 'Allow location access to see the sun near you.', true);
-  if (!navigator.geolocation) { say(4, 'No location support', 'This browser cannot share your location.'); return; }
-  navigator.geolocation.getCurrentPosition(
-    p => { me = [p.coords.latitude, p.coords.longitude]; map.setView(me, 10); },
-    e => say(4, 'Location unavailable', e.message),
-    {enableHighAccuracy: false, timeout: 15000});
-}
-locate();
+// first visit: ask; later visits: reuse the saved choice
+const savedPlace = store.get('sunPlace');
+if (store.get('sunMode') === 'place' && savedPlace) goTo(savedPlace.ll, 10);
+else if (store.get('sunMode') === 'gps') locate();
+else showSearch('Where are you?', 'Use your location, or type a ZIP code or town.');
 </script>
 </body>
 </html>
