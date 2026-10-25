@@ -172,12 +172,23 @@ function viewPoints() {
   return out;
 }
 
-// fill colour of one feature: blue gets likelier with cloud, red/yellow with sun, the rest stays paper-white
+const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+// fill colour of one feature: under heavy cloud nearly everything is blue, under clear sky nearly everything
+// yellow or red; only mixed skies leave most features paper-white
 function featureColor(v, classKey, kx, ky) {
   if (v == null) return PAPER;
   const u = hash3(classKey, kx, ky), t = v / 100;
-  const pB = .55 * t, pY = .40 * (1 - t), pR = .17 * (1 - t);
-  return u < pB ? BLUE : u < pB + pY ? YELLOW : u < pB + pY + pR ? RED : PAPER;
+  const pB = .95 * smooth(.35, .9, t), pSun = .95 * (1 - smooth(.1, .6, t));
+  return u < pB ? BLUE : u < pB + pSun * .7 ? YELLOW : u < pB + pSun ? RED : PAPER;
+}
+
+// the paper itself takes a faint wash: cream where it is sunny, pale blue where it is cloudy
+function paperTint(v) {
+  if (v == null) return PAPER;
+  const t = v / 100, sun = 1 - smooth(.1, .5, t), cloud = smooth(.5, .95, t);
+  const mix = (a, b, k) => Math.round(a + (b - a) * k);
+  return pack(mix(mix(255, 255, sun), 208, cloud), mix(mix(255, 243, sun), 222, cloud), mix(mix(255, 208, sun), 243, cloud));
 }
 
 // sort every pixel of an OSM tile into paper / street line / water / feature fill
@@ -262,10 +273,14 @@ function paintTile(canvas) {
       ? featureColor(cloudAtGlobal(gx, gy, z), ck[l], Math.floor(gx / 1024), Math.floor(gy / 1024))
       : featureColor(cloudAtGlobal(gx, gy, z), ck[l], Math.round(gx * 4), Math.round(gy * 4));
   }
+  const tint = new Uint32Array(1024);                       // paper wash in 16px blocks
+  for (let b = 0; b < 1024; b++) tint[b] = paperTint(cloudAtGlobal(ox + ((b & 31) * 16 + 8) / 2, oy + ((b >> 5) * 16 + 8) / 2, z));
   const ctx = canvas.getContext('2d'), img = ctx.createImageData(N, N), out = new Uint32Array(img.data.buffer);
   for (let i = 0; i < N * N; i++) {
     const c = cls[i];
-    out[i] = c === 1 ? LINE : c === 2 ? WATER : c === 3 ? (huge[lab[i]] ? huge[lab[i]][(((i >> 9) >> 7) << 2) | ((i & 511) >> 7)] : cols[lab[i]]) : PAPER;
+    let col = c === 1 ? LINE : c === 2 ? WATER : c === 3 ? (huge[lab[i]] ? huge[lab[i]][(((i >> 9) >> 7) << 2) | ((i & 511) >> 7)] : cols[lab[i]]) : PAPER;
+    if (col === PAPER) col = tint[((i >> 13) << 5) | ((i & 511) >> 4)];
+    out[i] = col;
   }
   ctx.putImageData(img, 0, 0);
 }
