@@ -53,6 +53,7 @@
   .ico.b0,.ico.b1,.ico.b2{color:#1d1d1f}.ico.b3,.ico.b4{color:#fff}
   .blk.b0,.blk.b1,.blk.b2{color:rgba(29,29,31,.8)}.blk.b3,.blk.b4{color:rgba(255,255,255,.92)}
   .b0{--c:var(--b0)}.b1{--c:var(--b1)}.b2{--c:var(--b2)}.b3{--c:var(--b3)}.b4{--c:var(--b4)}
+  .field{mix-blend-mode:multiply}
   /* wash out the OSM tiles so the blocks dominate */
   .leaflet-tile-pane{filter:grayscale(1) contrast(.7) brightness(1.2)}
   @media (prefers-color-scheme:dark){.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(1) brightness(.6) contrast(.9)}}
@@ -122,45 +123,48 @@ const value = p => sel === 0 ? p.now : p.daily[sel - 1];
 
 function render() {
   layer.clearLayers();
-  const data = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
+  const data = lastData = series.map((p, k) => ({pos: pts[k], cloud: value(p), day: p.day}));
   let best = null;
   data.forEach(d => {
     d.lv = level(d.cloud); d.dist = km(me, d.pos);
     if (d.cloud <= SUNNY && (!best || d.dist < best.dist)) best = d;
   });
   const here = data.reduce((a, b) => km(me, a.pos) < km(me, b.pos) ? a : b);
-  drawBlocks(data, here.cloud > SUNNY ? best : null); // outline the nearest sun only when it is elsewhere
+  drawField(data);
+  if (best && here.cloud > SUNNY) {
+    L.polyline([me, best.pos], {color: '#111', weight: 2, dashArray: '2 7', lineCap: 'round'}).addTo(layer);
+    L.circleMarker(best.pos, {radius: 11, color: '#111', weight: 3, fillColor: '#fff', fillOpacity: 1}).addTo(layer);
+  }
   const when = ['now', 'today', 'tomorrow'][sel] || 'that day';
   const night = sel === 0 && !here.day ? ' It is night there now.' : '';
   L.marker(me, {icon: L.divIcon({className: '', iconSize: [20, 20], iconAnchor: [10, 10], html: '<div class="pin"></div>'}), interactive: false}).addTo(layer);
   if (here.cloud <= SUNNY) say(here.lv, `Sunny ${when}`, `${here.cloud}% cloud at your location.${night}`);
-  else if (best) say(here.lv, `${here.cloud}% cloud ${when}`, `Nearest sun is ${best.dist.toFixed(0)} km away (${best.cloud}% cloud). Outlined in black.${night}`);
+  else if (best) say(here.lv, `${here.cloud}% cloud ${when}`, `Nearest sun is ${best.dist.toFixed(0)} km away (${best.cloud}% cloud).${night}`);
   else say(here.lv, `Cloudy ${when}`, `${here.cloud}% cloud here and no sun in this view. Zoom out or pan to look further.`);
 }
 
-// merge neighbouring cells of the same level into rectangles (Mondrian look) and draw them
-function drawBlocks(data, best) {
-  const size = map.getSize(), cw = size.x / grid.cols, ch = size.y / grid.rows;
-  const seen = new Set(), at = (r, c) => r * grid.cols + c;
-  for (let r = 0; r < grid.rows; r++) for (let c = 0; c < grid.cols; c++) {
-    if (seen.has(at(r, c))) continue;
-    const lv = data[at(r, c)].lv;
-    const ok = (rr, cc) => cc < grid.cols && rr < grid.rows && !seen.has(at(rr, cc)) && data[at(rr, cc)].lv === lv;
-    let w = 1; while (ok(r, c + w)) w++;
-    let h = 1; while ([...Array(w).keys()].every(i => ok(r + h, c + i))) h++;
-    const members = [];
-    for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) { seen.add(at(r + i, c + j)); members.push(data[at(r + i, c + j)]); }
-    const avg = Math.round(members.reduce((a, m) => a + m.cloud, 0) / members.length);
-    const nw = map.containerPointToLatLng([c * cw, r * ch]), se = map.containerPointToLatLng([(c + w) * cw, (r + h) * ch]);
-    const isBest = !!best && members.includes(best);
-    L.rectangle([nw, se], {color: isBest ? '#111' : '#fff', weight: isBest ? 4 : 3, opacity: 1,
-      fillColor: ['#ff6a13', '#fdd22f', '#a8e4ef', '#3b88d4', '#0f4c97'][lv], fillOpacity: .78})
-      .bindTooltip(`${avg}% cloud`).addTo(layer);
-    const is = Math.max(14, Math.min(34, Math.min(w * cw, h * ch) * .32));
-    L.marker(map.containerPointToLatLng([(c + w / 2) * cw, (r + h / 2) * ch]), {interactive: false, icon: L.divIcon({
-      className: '', iconSize: [0, 0],
-      html: `<div class="blk b${lv}" style="position:absolute;width:${is}px;height:${is}px;transform:translate(-50%,-50%)">${iconFor(lv)}</div>`})}).addTo(layer);
+const BAND = ['#ff6a13', '#fdd22f', '#a8e4ef', '#3b88d4', '#0f4c97'].map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)));
+
+// cloud cover at a pixel of the grid's screen (bilinear between the grid points)
+function sample(data, px, py) {
+  const {cols, rows, size} = grid;
+  const fx = Math.max(0, Math.min(cols - 1, px / (size.x / cols) - .5)), fy = Math.max(0, Math.min(rows - 1, py / (size.y / rows) - .5));
+  const j = Math.min(Math.floor(fx), cols - 2), i = Math.min(Math.floor(fy), rows - 2), tx = fx - j, ty = fy - i;
+  const v = (r, c) => data[r * cols + c].cloud;
+  return (v(i, j) * (1 - tx) + v(i, j + 1) * tx) * (1 - ty) + (v(i + 1, j) * (1 - tx) + v(i + 1, j + 1) * tx) * ty;
+}
+
+// paint the whole view as a smooth field of flat colour bands and lay it over the map
+function drawField(data) {
+  const S = .5, W = Math.ceil(grid.size.x * S), H = Math.ceil(grid.size.y * S);
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d'), img = ctx.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const col = BAND[level(sample(data, x / S, y / S))], o = (y * W + x) * 4;
+    img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
   }
+  ctx.putImageData(img, 0, 0);
+  L.imageOverlay(cv.toDataURL(), grid.bounds, {opacity: .8, interactive: false, className: 'field'}).addTo(layer);
 }
 
 // grid of points covering the visible map area
@@ -172,7 +176,7 @@ function gridForView() {
     const p = map.containerPointToLatLng([size.x * (j + .5) / cols, size.y * (i + .5) / rows]);
     out.push([p.lat, p.lng]);
   }
-  return {cols, rows, pts: out};
+  return {cols, rows, pts: out, size, bounds: map.getBounds()};
 }
 
 async function load() {
@@ -202,6 +206,15 @@ async function load() {
     render();
   } catch (e) { if (id === loadId) say(4, 'Could not load weather', e.message); }
 }
+
+// tap anywhere to read the cloud cover there
+let lastData = [];
+map.on('click', e => {
+  if (!lastData.length) return;
+  const nw = map.latLngToLayerPoint(grid.bounds.getNorthWest()), p = map.latLngToLayerPoint(e.latlng);
+  L.popup({closeButton: false, offset: [0, -4]}).setLatLng(e.latlng)
+    .setContent(`<b>${Math.round(sample(lastData, p.x - nw.x, p.y - nw.y))}%</b> cloud`).openOn(map);
+});
 
 // reload the grid once the user stops panning or zooming
 map.on('moveend', () => { if (me) { clearTimeout(timer); timer = setTimeout(load, 700); } });
